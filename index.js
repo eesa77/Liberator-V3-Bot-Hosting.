@@ -9,6 +9,7 @@ const {
   ButtonStyle,
   ApplicationIntegrationType,
   InteractionContextType,
+  PermissionFlagsBits,
 } = require("discord.js");
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -66,8 +67,8 @@ const sayCommand = new SlashCommandBuilder()
     InteractionContextType.PrivateChannel,
   ]);
 
-const masssayCommand = new SlashCommandBuilder()
-  .setName("masssay")
+const raidCommand = new SlashCommandBuilder()
+  .setName("raid")
   .setDescription(
     "Spawn a Fire button that blasts 5 copies of your message per press"
   )
@@ -87,6 +88,12 @@ const masssayCommand = new SlashCommandBuilder()
     InteractionContextType.PrivateChannel,
   ]);
 
+const terraformCommand = new SlashCommandBuilder()
+  .setName("terraform")
+  .setDescription("Repurpose this server by archiving all channels and roles")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .setContexts([InteractionContextType.Guild]);
+
 // ---------------------------------------------------------------------------
 // Register commands with Discord
 // ---------------------------------------------------------------------------
@@ -96,7 +103,7 @@ async function registerCommands(clientId) {
   try {
     console.log("Registering global slash commands...");
     await rest.put(Routes.applicationCommands(clientId), {
-      body: [sayCommand.toJSON(), masssayCommand.toJSON()],
+      body: [sayCommand.toJSON(), raidCommand.toJSON(), terraformCommand.toJSON()],
     });
     console.log("Slash commands registered successfully.");
   } catch (err) {
@@ -126,7 +133,29 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    if (interaction.commandName === "masssay") {
+    if (interaction.commandName === "terraform") {
+      const confirmBtn = new ButtonBuilder()
+        .setCustomId("terraform:confirm")
+        .setLabel("Yes, archive this server")
+        .setStyle(ButtonStyle.Danger);
+
+      const cancelBtn = new ButtonBuilder()
+        .setCustomId("terraform:cancel")
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Secondary);
+
+      const row = new ActionRowBuilder().addComponents(confirmBtn, cancelBtn);
+
+      await interaction.reply({
+        content:
+          "This will delete every channel, delete every non-default role, and rename this server to **[Archived Server]**. This cannot be undone. Are you sure?",
+        components: [row],
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (interaction.commandName === "raid") {
       const text = interaction.options.getString("message");
       const msgId = storeMessage(text);
       await interaction.reply({
@@ -142,6 +171,50 @@ client.on("interactionCreate", async (interaction) => {
   // ------------------------------------------------------------------
   if (interaction.isButton()) {
     const [action, msgId] = interaction.customId.split(":");
+
+    if (action === "terraform") {
+      if (msgId === "cancel") {
+        await interaction.update({
+          content: "Cancelled.",
+          components: [],
+        });
+        return;
+      }
+
+      if (msgId === "confirm") {
+        await interaction.update({
+          content: "Archiving server...",
+          components: [],
+        });
+
+        const guild = interaction.guild;
+
+        // Delete all channels
+        const channels = await guild.channels.fetch();
+        for (const [, channel] of channels) {
+          try {
+            await channel.delete();
+          } catch (_) {}
+        }
+
+        // Delete all non-default roles (@everyone and bot-managed roles cannot be deleted)
+        const roles = await guild.roles.fetch();
+        for (const [, role] of roles) {
+          if (role.managed || role.name === "@everyone") continue;
+          try {
+            await role.delete();
+          } catch (_) {}
+        }
+
+        // Rename the server
+        try {
+          await guild.setName("[Archived Server]");
+        } catch (_) {}
+
+        return;
+      }
+    }
+
     const text = messageStore.get(msgId);
 
     if (!text) {
@@ -153,9 +226,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (action === "fire") {
-      // Acknowledge the button press without changing the original message
       await interaction.deferUpdate();
-      // Send 5 follow-up messages
       for (let i = 0; i < 5; i++) {
         await interaction.followUp({ content: text });
       }
@@ -163,9 +234,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (action === "more") {
-      // Acknowledge without editing the original message
       await interaction.deferUpdate();
-      // Spawn a brand-new message with fresh buttons
       await interaction.followUp({
         content: text,
         components: [getSpamRow(msgId)],
