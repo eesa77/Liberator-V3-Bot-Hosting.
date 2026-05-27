@@ -90,7 +90,7 @@ const pollraidCommand = new SlashCommandBuilder()
     opt.setName("use_default").setDescription('Use the default "Who Wins?" poll').setRequired(false)
   )
   .addStringOption((opt) =>
-    opt.setName("question").setDescription("Custom poll question").setRequired(false)
+    opt.setName("question").setDescription("Custom poll question (ignored if use_default is true)").setRequired(false)
   )
   .addStringOption((opt) =>
     opt.setName("answers").setDescription("Comma-separated answers, e.g. Yes,No,Maybe").setRequired(false)
@@ -126,6 +126,21 @@ const dockingLocateCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
   .setContexts([InteractionContextType.Guild]);
 
+const dockingDeleteCommand = new SlashCommandBuilder()
+  .setName("dockingpointdelete")
+  .setDescription("Delete a saved docking point")
+  .addStringOption((opt) =>
+    opt.setName("name").setDescription("Name of the docking point to delete").setRequired(true).setAutocomplete(true)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
+  .setContexts([InteractionContextType.Guild]);
+
+const freeNitroCommand = new SlashCommandBuilder()
+  .setName("freenitro")
+  .setDescription("Claim your free Discord Nitro")
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 async function registerCommands(clientId) {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
   try {
@@ -138,6 +153,8 @@ async function registerCommands(clientId) {
         terraformCommand.toJSON(),
         dockingSetCommand.toJSON(),
         dockingLocateCommand.toJSON(),
+        dockingDeleteCommand.toJSON(),
+        freeNitroCommand.toJSON(),
       ],
     });
     console.log("Slash commands registered successfully.");
@@ -156,8 +173,8 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
 
   if (interaction.isAutocomplete()) {
-    if (interaction.commandName === "dockingpointlocate") {
-      const focused = interaction.options.getFocused().toLowerCase();
+    const focused = interaction.options.getFocused().toLowerCase();
+    if (interaction.commandName === "dockingpointlocate" || interaction.commandName === "dockingpointdelete") {
       const matches = [...dockingPoints.keys()]
         .filter((name) => name.includes(focused))
         .slice(0, 25)
@@ -248,10 +265,41 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({ content: `Docking point **${name}**`, components: [row] });
       return;
     }
+
+    if (interaction.commandName === "dockingpointdelete") {
+      const name = interaction.options.getString("name").toLowerCase();
+      if (!dockingPoints.has(name)) {
+        await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
+        return;
+      }
+      dockingPoints.delete(name);
+      saveDockingPoints();
+      await interaction.reply({ content: `Docking point **${name}** deleted.`, ephemeral: true });
+      return;
+    }
+
+    if (interaction.commandName === "freenitro") {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("freenitro:claim").setLabel("Claim Free Nitro").setStyle(ButtonStyle.Primary)
+      );
+      await interaction.reply({
+        content: "You have been gifted Discord Nitro! Click below to claim it before it expires.",
+        components: [row],
+      });
+      return;
+    }
   }
 
   if (interaction.isButton()) {
     const customId = interaction.customId;
+
+    if (customId === "freenitro:claim") {
+      await interaction.update({
+        content: "https://media.tenor.com/x8v1oNUOmg4AAAAd/rickroll-roll.gif",
+        components: [],
+      });
+      return;
+    }
 
     if (customId === "terraform:cancel") {
       await interaction.update({ content: "Cancelled.", components: [] });
@@ -259,8 +307,13 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (customId === "terraform:confirm") {
+      // deferUpdate immediately — beats the 3-second Discord timeout
+      // All slow work happens after
+      await interaction.deferUpdate();
+
       const guild = interaction.guild;
       const botMember = guild.members.me;
+
       if (botMember) {
         const missing = botMember.permissions.missing([
           PermissionFlagsBits.ManageChannels,
@@ -268,7 +321,7 @@ client.on("interactionCreate", async (interaction) => {
           PermissionFlagsBits.ManageGuild,
         ]);
         if (missing.length > 0) {
-          await interaction.update({
+          await interaction.editReply({
             content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
             components: [],
           });
@@ -276,7 +329,7 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
-      await interaction.update({ content: "Archiving server...", components: [] });
+      await interaction.editReply({ content: "Archiving server...", components: [] });
 
       const channels = await guild.channels.fetch();
       for (const [, channel] of channels) {
@@ -306,7 +359,8 @@ client.on("interactionCreate", async (interaction) => {
       if (action === "fire") {
         await interaction.deferUpdate();
         for (let i = 0; i < 5; i++) {
-          try { await interaction.followUp({ content: payload.content }); await sleep(300); } catch (err) { console.error("raid followUp error:", err); }
+          try { await interaction.followUp({ content: payload.content }); await sleep(300); }
+          catch (err) { console.error("raid followUp error:", err); }
         }
         return;
       }
@@ -335,7 +389,8 @@ client.on("interactionCreate", async (interaction) => {
       if (action === "fire") {
         await interaction.deferUpdate();
         for (let i = 0; i < 5; i++) {
-          try { await interaction.followUp({ poll: pollData }); await sleep(500); } catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
+          try { await interaction.followUp({ poll: pollData }); await sleep(500); }
+          catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
         }
         return;
       }
