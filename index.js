@@ -20,6 +20,10 @@ if (!TOKEN) {
   process.exit(1);
 }
 
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+
 const messageStore = new Map();
 let counter = 0;
 
@@ -34,13 +38,15 @@ function getSpamRow(prefix, msgId) {
     .setCustomId(`${prefix}fire:${msgId}`)
     .setLabel("Fire")
     .setStyle(ButtonStyle.Danger);
-
   const more = new ButtonBuilder()
     .setCustomId(`${prefix}more:${msgId}`)
     .setLabel("More Buttons")
     .setStyle(ButtonStyle.Secondary);
-
   return new ActionRowBuilder().addComponents(fire, more);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const DOCKING_FILE = "./docking-points.json";
@@ -65,15 +71,8 @@ const sayCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("message").setDescription("The message to send").setRequired(true)
   )
-  .setIntegrationTypes([
-    ApplicationIntegrationType.GuildInstall,
-    ApplicationIntegrationType.UserInstall,
-  ])
-  .setContexts([
-    InteractionContextType.Guild,
-    InteractionContextType.BotDM,
-    InteractionContextType.PrivateChannel,
-  ]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const raidCommand = new SlashCommandBuilder()
   .setName("raid")
@@ -81,54 +80,26 @@ const raidCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("message").setDescription("The message to spam").setRequired(true)
   )
-  .setIntegrationTypes([
-    ApplicationIntegrationType.GuildInstall,
-    ApplicationIntegrationType.UserInstall,
-  ])
-  .setContexts([
-    InteractionContextType.Guild,
-    InteractionContextType.BotDM,
-    InteractionContextType.PrivateChannel,
-  ]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const pollraidCommand = new SlashCommandBuilder()
   .setName("pollraid")
   .setDescription("Spawn a Fire button that blasts 5 Discord polls per press")
   .addBooleanOption((opt) =>
-    opt
-      .setName("use_default")
-      .setDescription('Use the default "Who Wins?" poll')
-      .setRequired(false)
+    opt.setName("use_default").setDescription('Use the default "Who Wins?" poll').setRequired(false)
   )
   .addStringOption((opt) =>
-    opt
-      .setName("question")
-      .setDescription("Custom poll question (ignored if use_default is true)")
-      .setRequired(false)
+    opt.setName("question").setDescription("Custom poll question").setRequired(false)
   )
   .addStringOption((opt) =>
-    opt
-      .setName("answers")
-      .setDescription("Comma-separated answers, e.g. Yes,No,Maybe (ignored if use_default is true)")
-      .setRequired(false)
+    opt.setName("answers").setDescription("Comma-separated answers, e.g. Yes,No,Maybe").setRequired(false)
   )
   .addIntegerOption((opt) =>
-    opt
-      .setName("duration")
-      .setDescription("Poll duration in hours (1-32, default 24)")
-      .setMinValue(1)
-      .setMaxValue(32)
-      .setRequired(false)
+    opt.setName("duration").setDescription("Poll duration in hours (1-32, default 24)").setMinValue(1).setMaxValue(32).setRequired(false)
   )
-  .setIntegrationTypes([
-    ApplicationIntegrationType.GuildInstall,
-    ApplicationIntegrationType.UserInstall,
-  ])
-  .setContexts([
-    InteractionContextType.Guild,
-    InteractionContextType.BotDM,
-    InteractionContextType.PrivateChannel,
-  ]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const terraformCommand = new SlashCommandBuilder()
   .setName("terraform")
@@ -150,7 +121,7 @@ const dockingLocateCommand = new SlashCommandBuilder()
   .setName("dockingpointlocate")
   .setDescription("Get a jump link to a saved docking point")
   .addStringOption((opt) =>
-    opt.setName("name").setDescription("Name of the docking point").setRequired(true)
+    opt.setName("name").setDescription("Name of the docking point").setRequired(true).setAutocomplete(true)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
   .setContexts([InteractionContextType.Guild]);
@@ -183,21 +154,30 @@ client.once("ready", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+
+  if (interaction.isAutocomplete()) {
+    if (interaction.commandName === "dockingpointlocate") {
+      const focused = interaction.options.getFocused().toLowerCase();
+      const matches = [...dockingPoints.keys()]
+        .filter((name) => name.includes(focused))
+        .slice(0, 25)
+        .map((name) => ({ name, value: name }));
+      await interaction.respond(matches);
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === "say") {
-      const text = interaction.options.getString("message");
-      await interaction.reply({ content: text });
+      await interaction.reply({ content: interaction.options.getString("message") });
       return;
     }
 
     if (interaction.commandName === "raid") {
       const text = interaction.options.getString("message");
       const id = storePayload({ type: "text", content: text });
-      await interaction.reply({
-        content: text,
-        components: [getSpamRow("r", id)],
-      });
+      await interaction.reply({ content: text, components: [getSpamRow("r", id)] });
       return;
     }
 
@@ -213,10 +193,7 @@ client.on("interactionCreate", async (interaction) => {
         question = interaction.options.getString("question");
         const rawAnswers = interaction.options.getString("answers");
         if (!question || !rawAnswers) {
-          await interaction.reply({
-            content: "Provide both a question and answers, or set use_default to True.",
-            ephemeral: true,
-          });
+          await interaction.reply({ content: "Provide both a question and answers, or set use_default to True.", ephemeral: true });
           return;
         }
         answers = rawAnswers.split(",").map((a) => a.trim()).filter(Boolean);
@@ -231,23 +208,15 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const id = storePayload({ type: "poll", question, answers, duration });
-      await interaction.reply({
-        content: `Poll: ${question}`,
-        components: [getSpamRow("p", id)],
-      });
+      await interaction.reply({ content: `Poll: ${question}`, components: [getSpamRow("p", id)] });
       return;
     }
 
     if (interaction.commandName === "terraform") {
-      const confirmBtn = new ButtonBuilder()
-        .setCustomId("terraform:confirm")
-        .setLabel("Yes, archive this server")
-        .setStyle(ButtonStyle.Danger);
-      const cancelBtn = new ButtonBuilder()
-        .setCustomId("terraform:cancel")
-        .setLabel("Cancel")
-        .setStyle(ButtonStyle.Secondary);
-      const row = new ActionRowBuilder().addComponents(confirmBtn, cancelBtn);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("terraform:confirm").setLabel("Yes, archive this server").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId("terraform:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+      );
       await interaction.reply({
         content: `Archive **${interaction.guild.name}**?\n\nThis will delete every channel, every non-default role, and rename the server to **[Archived Server]**. This cannot be undone.`,
         components: [row],
@@ -258,9 +227,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "dockingpointset") {
       const name = interaction.options.getString("name");
-      await interaction.reply({
-        content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`,
-      });
+      await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.` });
       const reply = await interaction.fetchReply();
       const url = `https://discord.com/channels/${interaction.guildId}/${reply.channelId}/${reply.id}`;
       dockingPoints.set(name.toLowerCase(), url);
@@ -272,21 +239,13 @@ client.on("interactionCreate", async (interaction) => {
       const name = interaction.options.getString("name");
       const url = dockingPoints.get(name.toLowerCase());
       if (!url) {
-        await interaction.reply({
-          content: `No docking point named **${name}** found. Set one first with /dockingpointset.`,
-          ephemeral: true,
-        });
+        await interaction.reply({ content: `No docking point named **${name}** found. Set one first with /dockingpointset.`, ephemeral: true });
         return;
       }
-      const jumpBtn = new ButtonBuilder()
-        .setLabel(`Jump to: ${name}`)
-        .setURL(url)
-        .setStyle(ButtonStyle.Link);
-      const row = new ActionRowBuilder().addComponents(jumpBtn);
-      await interaction.reply({
-        content: `Docking point **${name}**`,
-        components: [row],
-      });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setLabel(`Jump to: ${name}`).setURL(url).setStyle(ButtonStyle.Link)
+      );
+      await interaction.reply({ content: `Docking point **${name}**`, components: [row] });
       return;
     }
   }
@@ -301,30 +260,36 @@ client.on("interactionCreate", async (interaction) => {
 
     if (customId === "terraform:confirm") {
       const guild = interaction.guild;
-      const botMember = await guild.members.fetchMe();
-      const missing = botMember.permissions.missing([
-        PermissionFlagsBits.ManageChannels,
-        PermissionFlagsBits.ManageRoles,
-        PermissionFlagsBits.ManageGuild,
-      ]);
-      if (missing.length > 0) {
-        await interaction.update({
-          content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
-          components: [],
-        });
-        return;
+      const botMember = guild.members.me;
+      if (botMember) {
+        const missing = botMember.permissions.missing([
+          PermissionFlagsBits.ManageChannels,
+          PermissionFlagsBits.ManageRoles,
+          PermissionFlagsBits.ManageGuild,
+        ]);
+        if (missing.length > 0) {
+          await interaction.update({
+            content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
+            components: [],
+          });
+          return;
+        }
       }
+
       await interaction.update({ content: "Archiving server...", components: [] });
+
       const channels = await guild.channels.fetch();
       for (const [, channel] of channels) {
         if (!channel) continue;
         try { await channel.delete(); } catch (_) {}
       }
+
       const roles = await guild.roles.fetch();
       for (const [, role] of roles) {
         if (!role || role.managed || role.name === "@everyone") continue;
         try { await role.delete(); } catch (_) {}
       }
+
       try { await guild.setName("[Archived Server]"); } catch (_) {}
       return;
     }
@@ -340,7 +305,9 @@ client.on("interactionCreate", async (interaction) => {
       }
       if (action === "fire") {
         await interaction.deferUpdate();
-        for (let i = 0; i < 5; i++) await interaction.followUp({ content: payload.content });
+        for (let i = 0; i < 5; i++) {
+          try { await interaction.followUp({ content: payload.content }); await sleep(300); } catch (err) { console.error("raid followUp error:", err); }
+        }
         return;
       }
       if (action === "more") {
@@ -367,7 +334,9 @@ client.on("interactionCreate", async (interaction) => {
       };
       if (action === "fire") {
         await interaction.deferUpdate();
-        for (let i = 0; i < 5; i++) await interaction.followUp({ poll: pollData });
+        for (let i = 0; i < 5; i++) {
+          try { await interaction.followUp({ poll: pollData }); await sleep(500); } catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
+        }
         return;
       }
       if (action === "more") {
