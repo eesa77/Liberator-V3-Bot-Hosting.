@@ -49,7 +49,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Docking points — saved to docking-points.json, survives index.js updates
 const DOCKING_FILE = "./docking-points.json";
 
 function loadDockingPoints() {
@@ -70,7 +69,6 @@ function saveDockingPoints() {
 
 const dockingPoints = loadDockingPoints();
 
-// Hitlist — saved to hitlist.json, survives index.js updates
 const HITLIST_FILE = "./hitlist.json";
 
 function loadHitlist() {
@@ -117,10 +115,6 @@ function buildHitlistEmbed(entry) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Command definitions
-// ---------------------------------------------------------------------------
-
 const sayCommand = new SlashCommandBuilder()
   .setName("say")
   .setDescription("Make the bot repeat a message")
@@ -140,10 +134,10 @@ const raidCommand = new SlashCommandBuilder()
     opt.setName("message").setDescription("The message to spam").setRequired(true)
   )
   .addNumberOption((opt) =>
-    opt.setName("interval").setDescription("Seconds between each message (0.1–1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+    opt.setName("interval").setDescription("Seconds between each message (0.1-1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
   )
   .addBooleanOption((opt) =>
-    opt.setName("ephemeral").setDescription("Only you can see the launcher (spam is still public)").setRequired(false)
+    opt.setName("ephemeral").setDescription("Only you can see the launcher — spam is still public").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -164,13 +158,13 @@ const pollraidCommand = new SlashCommandBuilder()
     opt.setName("duration").setDescription("Poll duration in hours (1-32, default 24)").setMinValue(1).setMaxValue(32).setRequired(false)
   )
   .addIntegerOption((opt) =>
-    opt.setName("count").setDescription("Polls per click (3–20, default 5)").setMinValue(3).setMaxValue(20).setRequired(false)
+    opt.setName("count").setDescription("Polls fired per click (3-20, default 5)").setMinValue(3).setMaxValue(20).setRequired(false)
   )
   .addNumberOption((opt) =>
-    opt.setName("interval").setDescription("Seconds between each poll (0.1–1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+    opt.setName("interval").setDescription("Seconds between each poll (0.1-1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
   )
   .addBooleanOption((opt) =>
-    opt.setName("ephemeral").setDescription("Only you can see the launcher (spam is still public)").setRequired(false)
+    opt.setName("ephemeral").setDescription("Only you can see the launcher — spam is still public").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -236,15 +230,15 @@ const uploadHitlistCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("displayname").setDescription("Display name to show on the card").setRequired(true)
   )
-  .addStringOption((opt) =>
-    opt.setName("username").setDescription("Username (optional — auto-fetched from Discord if left blank)").setRequired(false).setAutocomplete(true)
-  )
   .addIntegerOption((opt) =>
     opt.setName("threatlevel")
       .setDescription("1=Blue(Low) 2=Green(Moderate) 3=Yellow(Elevated) 4=Orange(High) 5=Red(Severe) 6=Purple(Extreme)")
       .setRequired(true)
       .setMinValue(1)
       .setMaxValue(6)
+  )
+  .addStringOption((opt) =>
+    opt.setName("username").setDescription("Username (optional — auto-fetched from Discord if blank)").setRequired(false).setAutocomplete(true)
   )
   .addBooleanOption((opt) =>
     opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
@@ -263,10 +257,6 @@ const viewHitlistCommand = new SlashCommandBuilder()
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
-
-// ---------------------------------------------------------------------------
-// Register commands
-// ---------------------------------------------------------------------------
 
 async function registerCommands(clientId) {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -292,10 +282,6 @@ async function registerCommands(clientId) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Client
-// ---------------------------------------------------------------------------
-
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("ready", async () => {
@@ -305,7 +291,6 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
 
-  // Autocomplete
   if (interaction.isAutocomplete()) {
     const focused = interaction.options.getFocused().toLowerCase();
     const cmd = interaction.commandName;
@@ -346,7 +331,6 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  // Slash commands
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === "say") {
@@ -356,8 +340,8 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "raid") {
-      const text     = interaction.options.getString("message");
-      const interval = interaction.options.getNumber("interval") ?? 1.0;
+      const text      = interaction.options.getString("message");
+      const interval  = interaction.options.getNumber("interval") ?? 1.0;
       const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
       const id = storePayload({ type: "text", content: text, interval });
       await interaction.reply({ content: text, components: [getSpamRow("r", id)], ephemeral });
@@ -524,7 +508,6 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Button interactions
   if (interaction.isButton()) {
     const customId = interaction.customId;
 
@@ -578,10 +561,10 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (customId.startsWith("rfire:") || customId.startsWith("rmore:")) {
-      const colon  = customId.indexOf(":");
-      const action = customId.slice(1, colon);
-      const id     = customId.slice(colon + 1);
-      const payload = messageStore.get(id);
+      const colon      = customId.indexOf(":");
+      const action     = customId.slice(1, colon);
+      const id         = customId.slice(colon + 1);
+      const payload    = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
         return;
@@ -603,10 +586,10 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (customId.startsWith("pfire:") || customId.startsWith("pmore:")) {
-      const colon  = customId.indexOf(":");
-      const action = customId.slice(1, colon);
-      const id     = customId.slice(colon + 1);
-      const payload = messageStore.get(id);
+      const colon      = customId.indexOf(":");
+      const action     = customId.slice(1, colon);
+      const id         = customId.slice(colon + 1);
+      const payload    = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
         return;
@@ -621,4 +604,19 @@ client.on("interactionCreate", async (interaction) => {
       const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
       if (action === "fire") {
         await interaction.deferUpdate();
-        for (let i = 0; i
+        for (let i = 0; i < count; i++) {
+          try { await interaction.followUp({ poll: pollData }); await sleep(intervalMs); }
+          catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
+        }
+        return;
+      }
+      if (action === "more") {
+        await interaction.deferUpdate();
+        await interaction.followUp({ content: `Poll: ${payload.question}`, components: [getSpamRow("p", id)] });
+        return;
+      }
+    }
+  }
+});
+
+client.login(TOKEN);
