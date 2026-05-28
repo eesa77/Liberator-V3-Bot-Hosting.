@@ -1,12 +1,13 @@
 {
-  "name": "FreedomFaller V3",
+  "name": "FreedomFaller V4",
   "version": "1.0.0",
-  "description": "Discord bot with /say and /masssay commands",
+  "description": "Discord bot with /say, /raid, /pollraid, /terraform, docking points, hitlist, and more",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.16.0"
+    "discord.js": "^14.16.0",
+    "@napi-rs/canvas": "^0.1.68"
   }
 }
