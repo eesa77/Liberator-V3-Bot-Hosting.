@@ -10,10 +10,8 @@ const {
   ApplicationIntegrationType,
   InteractionContextType,
   PermissionFlagsBits,
-  AttachmentBuilder,
 } = require("discord.js");
 const fs = require("fs");
-const { createCanvas, loadImage } = require("@napi-rs/canvas");
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
@@ -94,116 +92,21 @@ const THREAT = {
   6: { color: "#6C3483", name: "PURPLE", label: "EXTREME"  },
 };
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
-}
-
-async function buildHitlistCard(entry) {
+function buildHitlistEmbed(entry) {
   const threat = THREAT[entry.threatLevel] ?? THREAT[1];
-  const W = 660;
-  const H = 260;
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext("2d");
-
-  ctx.fillStyle = threat.color;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = "rgba(0,0,0,0.42)";
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = "rgba(255,255,255,0.06)";
-  ctx.fillRect(0, 0, 215, H);
-
-  const AX = 107;
-  const AY = 130;
-  const AR = 84;
-
-  try {
-    const img = await loadImage(entry.avatarUrl);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(AX, AY, AR + 5, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(255,255,255,0.85)";
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(AX, AY, AR, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.clip();
-    ctx.drawImage(img, AX - AR, AY - AR, AR * 2, AR * 2);
-    ctx.restore();
-  } catch {
-    ctx.fillStyle = "rgba(255,255,255,0.2)";
-    ctx.beginPath();
-    ctx.arc(AX, AY, AR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.5)";
-    ctx.font = "bold 28px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("?", AX, AY + 10);
-    ctx.textAlign = "left";
-  }
-
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(215, 18);
-  ctx.lineTo(215, H - 18);
-  ctx.stroke();
-
-  const TX = 234;
-
-  ctx.fillStyle = threat.color;
-  ctx.font = "bold 12px sans-serif";
-  ctx.fillText("H I T L I S T", TX, 38);
-
-  ctx.fillStyle = "rgba(255,255,255,0.12)";
-  roundRect(ctx, W - 160, 16, 148, 28, 4);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.8)";
-  ctx.font = "bold 11px sans-serif";
-  ctx.textAlign = "right";
-  ctx.fillText(`${threat.name}  THREAT`, W - 18, 35);
-  ctx.textAlign = "left";
-
-  ctx.fillStyle = "#FFFFFF";
-  ctx.font = "bold 27px sans-serif";
-  const dname = entry.displayName.length > 22
-    ? entry.displayName.slice(0, 21) + "\u2026"
-    : entry.displayName;
-  ctx.fillText(dname, TX, 90);
-
-  ctx.fillStyle = "rgba(255,255,255,0.65)";
-  ctx.font = "16px sans-serif";
-  ctx.fillText(`@${entry.username || "unknown"}`, TX, 122);
-
-  ctx.fillStyle = "rgba(255,255,255,0.38)";
-  ctx.font = "13px sans-serif";
-  ctx.fillText(`ID: ${entry.userId}`, TX, 150);
-
-  ctx.font = "23px sans-serif";
-  let sx = TX;
-  for (let i = 0; i < 6; i++) {
-    ctx.fillStyle = i < entry.threatLevel ? "#FFD700" : "rgba(255,255,255,0.12)";
-    ctx.fillText("\u2605", sx, 195);
-    sx += 27;
-  }
-
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.font = "bold 11px sans-serif";
-  ctx.fillText(`THREAT LEVEL ${entry.threatLevel}/6  \u2014  ${threat.label}`, TX, 228);
-
-  return canvas.toBuffer("image/png");
+  const filled = "\u2605".repeat(entry.threatLevel);
+  const empty  = "\u2606".repeat(6 - entry.threatLevel);
+  return {
+    color: parseInt(threat.color.replace("#", ""), 16),
+    author: { name: "HITLIST" },
+    thumbnail: { url: entry.avatarUrl },
+    fields: [
+      { name: "Display Name", value: entry.displayName,                                              inline: true  },
+      { name: "Username",     value: `@${entry.username}`,                                           inline: true  },
+      { name: "User ID",      value: entry.userId,                                                   inline: false },
+      { name: "Threat Level", value: `${filled}${empty}  ${threat.name} \u2014 ${threat.label}`,    inline: false },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -527,20 +430,10 @@ client.on("interactionCreate", async (interaction) => {
       hitlist.set(userId, entry);
       saveHitlist();
 
-      let cardBuffer;
-      try {
-        cardBuffer = await buildHitlistCard(entry);
-      } catch (err) {
-        console.error("Canvas error:", err);
-        await interaction.editReply({ content: "Entry saved but failed to generate the card image." });
-        return;
-      }
-
-      const attachment = new AttachmentBuilder(cardBuffer, { name: "hitlist-card.png" });
       const threat = THREAT[threatLevel];
       await interaction.editReply({
         content: `**${displayName}** added to the hitlist. Threat level: **${threat.name} (${threat.label})**`,
-        files: [attachment],
+        embeds: [buildHitlistEmbed(entry)],
       });
       return;
     }
@@ -564,17 +457,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
-      let cardBuffer;
-      try {
-        cardBuffer = await buildHitlistCard(entry);
-      } catch (err) {
-        console.error("Canvas error:", err);
-        await interaction.editReply({ content: "Failed to generate the hitlist card." });
-        return;
-      }
-
-      const attachment = new AttachmentBuilder(cardBuffer, { name: "hitlist-card.png" });
-      await interaction.editReply({ files: [attachment] });
+      await interaction.editReply({ embeds: [buildHitlistEmbed(entry)] });
       return;
     }
   }
