@@ -24,6 +24,10 @@ process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection:", err);
 });
 
+// ---------------------------------------------------------------------------
+// In-memory store for button payloads
+// ---------------------------------------------------------------------------
+
 const messageStore = new Map();
 let counter = 0;
 
@@ -49,42 +53,36 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// ---------------------------------------------------------------------------
+// Docking points  (docking-points.json)
+// ---------------------------------------------------------------------------
+
 const DOCKING_FILE = "./docking-points.json";
 
 function loadDockingPoints() {
-  try {
-    return new Map(JSON.parse(fs.readFileSync(DOCKING_FILE, "utf8")));
-  } catch {
-    return new Map();
-  }
+  try { return new Map(JSON.parse(fs.readFileSync(DOCKING_FILE, "utf8"))); }
+  catch { return new Map(); }
 }
-
 function saveDockingPoints() {
-  try {
-    fs.writeFileSync(DOCKING_FILE, JSON.stringify([...dockingPoints]));
-  } catch (e) {
-    console.error("Could not save docking-points.json:", e);
-  }
+  try { fs.writeFileSync(DOCKING_FILE, JSON.stringify([...dockingPoints])); }
+  catch (e) { console.error("Could not save docking-points.json:", e); }
 }
 
 const dockingPoints = loadDockingPoints();
 
+// ---------------------------------------------------------------------------
+// Hitlist  (hitlist.json)
+// ---------------------------------------------------------------------------
+
 const HITLIST_FILE = "./hitlist.json";
 
 function loadHitlist() {
-  try {
-    return new Map(JSON.parse(fs.readFileSync(HITLIST_FILE, "utf8")));
-  } catch {
-    return new Map();
-  }
+  try { return new Map(JSON.parse(fs.readFileSync(HITLIST_FILE, "utf8"))); }
+  catch { return new Map(); }
 }
-
 function saveHitlist() {
-  try {
-    fs.writeFileSync(HITLIST_FILE, JSON.stringify([...hitlist]));
-  } catch (e) {
-    console.error("Could not save hitlist.json:", e);
-  }
+  try { fs.writeFileSync(HITLIST_FILE, JSON.stringify([...hitlist])); }
+  catch (e) { console.error("Could not save hitlist.json:", e); }
 }
 
 const hitlist = loadHitlist();
@@ -114,6 +112,65 @@ function buildHitlistEmbed(entry) {
     ],
   };
 }
+
+// ---------------------------------------------------------------------------
+// DM Contacts  (dm-contacts.json)
+// ---------------------------------------------------------------------------
+
+const DM_CONTACTS_FILE = "./dm-contacts.json";
+
+function loadDmContacts() {
+  try { return new Map(JSON.parse(fs.readFileSync(DM_CONTACTS_FILE, "utf8"))); }
+  catch { return new Map(); }
+}
+function saveDmContacts() {
+  try { fs.writeFileSync(DM_CONTACTS_FILE, JSON.stringify([...dmContacts])); }
+  catch (e) { console.error("Could not save dm-contacts.json:", e); }
+}
+
+const dmContacts = loadDmContacts();
+
+// ---------------------------------------------------------------------------
+// Charge Raid helpers
+// ---------------------------------------------------------------------------
+
+function getChargeRaidRows(id, charged) {
+  const rows = [];
+  const grid = [
+    [1,  1,  1,  1,  1 ],
+    [5,  5,  5,  5,  5 ],
+    [10, 10, 10, 10, 10],
+    [25, 25, 25, 25, 25],
+  ];
+  for (const amounts of grid) {
+    const btns = amounts.map((n) =>
+      new ButtonBuilder()
+        .setCustomId(`crc:${id}:${n}`)
+        .setLabel(`+${n}`)
+        .setStyle(ButtonStyle.Secondary)
+    );
+    rows.push(new ActionRowBuilder().addComponents(...btns));
+  }
+  const releaseBtn = new ButtonBuilder()
+    .setCustomId(`crr:${id}`)
+    .setLabel(charged > 0 ? `RELEASE  (${charged})` : "RELEASE")
+    .setStyle(ButtonStyle.Danger)
+    .setDisabled(charged === 0);
+  const resetBtn = new ButtonBuilder()
+    .setCustomId(`crz:${id}`)
+    .setLabel("RESET")
+    .setStyle(ButtonStyle.Primary);
+  rows.push(new ActionRowBuilder().addComponents(releaseBtn, resetBtn));
+  return rows;
+}
+
+function chargeRaidContent(content, charged) {
+  return `**Charge Raid**\nMessage: ${content}\nCharged: **${charged}** message${charged === 1 ? "" : "s"} ready to fire`;
+}
+
+// ---------------------------------------------------------------------------
+// Command definitions
+// ---------------------------------------------------------------------------
 
 const sayCommand = new SlashCommandBuilder()
   .setName("say")
@@ -169,12 +226,42 @@ const pollraidCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const chargeRaidCommand = new SlashCommandBuilder()
+  .setName("chargeraid")
+  .setDescription("Queue up messages with a button grid, then release them all at once")
+  .addStringOption((opt) =>
+    opt.setName("message").setDescription("The message to fire on release").setRequired(true)
+  )
+  .addNumberOption((opt) =>
+    opt.setName("interval").setDescription("Seconds between each message on release (0.1-1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the grid — fired messages are still public").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const terraformCommand = new SlashCommandBuilder()
   .setName("terraform")
   .setDescription("Repurpose this server by archiving all channels and roles")
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall])
   .setContexts([InteractionContextType.Guild])
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+
+const terraDmCommand = new SlashCommandBuilder()
+  .setName("terradm")
+  .setDescription("Send a DM to any user by their ID")
+  .addStringOption((opt) =>
+    opt.setName("userid").setDescription("Discord User ID (autocompletes past contacts)").setRequired(true).setAutocomplete(true)
+  )
+  .addStringOption((opt) =>
+    opt.setName("message").setDescription("Message to send").setRequired(true)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the confirmation").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
 const dockingSetCommand = new SlashCommandBuilder()
   .setName("dockingpointset")
@@ -238,7 +325,7 @@ const uploadHitlistCommand = new SlashCommandBuilder()
       .setMaxValue(6)
   )
   .addStringOption((opt) =>
-    opt.setName("username").setDescription("Username (optional — auto-fetched from Discord if blank)").setRequired(false).setAutocomplete(true)
+    opt.setName("username").setDescription("Username (optional — auto-fetched if blank)").setRequired(false).setAutocomplete(true)
   )
   .addBooleanOption((opt) =>
     opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
@@ -258,6 +345,10 @@ const viewHitlistCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+// ---------------------------------------------------------------------------
+// Register commands
+// ---------------------------------------------------------------------------
+
 async function registerCommands(clientId) {
   const rest = new REST({ version: "10" }).setToken(TOKEN);
   try {
@@ -267,7 +358,9 @@ async function registerCommands(clientId) {
         sayCommand.toJSON(),
         raidCommand.toJSON(),
         pollraidCommand.toJSON(),
+        chargeRaidCommand.toJSON(),
         terraformCommand.toJSON(),
+        terraDmCommand.toJSON(),
         dockingSetCommand.toJSON(),
         dockingLocateCommand.toJSON(),
         dockingDeleteCommand.toJSON(),
@@ -282,6 +375,10 @@ async function registerCommands(clientId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once("ready", async () => {
@@ -291,6 +388,9 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
 
+  // -------------------------------------------------------------------------
+  // Autocomplete
+  // -------------------------------------------------------------------------
   if (interaction.isAutocomplete()) {
     const focused = interaction.options.getFocused().toLowerCase();
     const cmd = interaction.commandName;
@@ -328,9 +428,21 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    if (cmd === "terradm") {
+      const matches = [...dmContacts.values()]
+        .filter((c) => c.username.toLowerCase().includes(focused))
+        .slice(0, 25)
+        .map((c) => ({ name: `${c.username} (${c.userId})`, value: c.userId }));
+      await interaction.respond(matches);
+      return;
+    }
+
     return;
   }
 
+  // -------------------------------------------------------------------------
+  // Slash commands
+  // -------------------------------------------------------------------------
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === "say") {
@@ -378,7 +490,24 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const id = storePayload({ type: "poll", question, answers, duration, count, interval });
-      await interaction.reply({ content: `Poll: ${question}`, components: [getSpamRow("p", id)], ephemeral });
+      await interaction.reply({
+        content: `Poll: ${question} — firing **${count}** per click`,
+        components: [getSpamRow("p", id)],
+        ephemeral,
+      });
+      return;
+    }
+
+    if (interaction.commandName === "chargeraid") {
+      const text      = interaction.options.getString("message");
+      const interval  = interaction.options.getNumber("interval") ?? 1.0;
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      const id = storePayload({ type: "chargeraid", content: text, interval, charged: 0 });
+      await interaction.reply({
+        content: chargeRaidContent(text, 0),
+        components: getChargeRaidRows(id, 0),
+        ephemeral,
+      });
       return;
     }
 
@@ -392,6 +521,39 @@ client.on("interactionCreate", async (interaction) => {
         components: [row],
         ephemeral: true,
       });
+      return;
+    }
+
+    if (interaction.commandName === "terradm") {
+      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+      await interaction.deferReply({ ephemeral });
+      try {
+        const userId  = interaction.options.getString("userid").trim();
+        const message = interaction.options.getString("message").trim();
+
+        let user;
+        try {
+          user = await client.users.fetch(userId);
+        } catch {
+          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
+          return;
+        }
+
+        try {
+          await user.send(message);
+        } catch {
+          await interaction.editReply({ content: `Could not send a DM to **${user.username}**. They may have DMs disabled or we share no mutual servers.` });
+          return;
+        }
+
+        dmContacts.set(userId, { userId, username: user.username });
+        saveDmContacts();
+
+        await interaction.editReply({ content: `DM sent to **${user.username}** (${userId}).` });
+      } catch (err) {
+        console.error("terradm error:", err);
+        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
+      }
       return;
     }
 
@@ -461,7 +623,7 @@ client.on("interactionCreate", async (interaction) => {
           avatarUrl = user.displayAvatarURL({ size: 256, extension: "png" });
           username  = interaction.options.getString("username")?.trim() || user.username;
         } catch {
-          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**. Make sure it is a valid User ID.` });
+          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
           return;
         }
 
@@ -508,9 +670,13 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Button interactions
+  // -------------------------------------------------------------------------
   if (interaction.isButton()) {
     const customId = interaction.customId;
 
+    // Free Nitro
     if (customId === "freenitro:claim") {
       await interaction.update({
         content: "https://media.tenor.com/x8v1oNUOmg4AAAAd/rickroll-roll.gif",
@@ -519,6 +685,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // Terraform
     if (customId === "terraform:cancel") {
       await interaction.update({ content: "Cancelled.", components: [] });
       return;
@@ -544,27 +711,88 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.update({ content: "Archiving server...", components: [] });
       try {
         const channels = await guild.channels.fetch();
-        for (const [, channel] of channels) {
-          if (!channel) continue;
-          try { await channel.delete(); } catch (_) {}
+        for (const [, ch] of channels) {
+          if (!ch) continue;
+          try { await ch.delete(); } catch (_) {}
         }
-      } catch (err) { console.error("Error fetching channels:", err); }
+      } catch (err) { console.error("Terraform channel error:", err); }
       try {
         const roles = await guild.roles.fetch();
         for (const [, role] of roles) {
           if (!role || role.managed || role.name === "@everyone") continue;
           try { await role.delete(); } catch (_) {}
         }
-      } catch (err) { console.error("Error fetching roles:", err); }
+      } catch (err) { console.error("Terraform role error:", err); }
       try { await guild.setName("[Archived Server]"); } catch (_) {}
       return;
     }
 
+    // Charge Raid — charge button  (crc:id:amount)
+    if (customId.startsWith("crc:")) {
+      const parts   = customId.split(":");
+      const id      = parts[1];
+      const amount  = parseInt(parts[2], 10);
+      const payload = messageStore.get(id);
+      if (!payload) {
+        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+        return;
+      }
+      payload.charged = (payload.charged ?? 0) + amount;
+      await interaction.update({
+        content: chargeRaidContent(payload.content, payload.charged),
+        components: getChargeRaidRows(id, payload.charged),
+      });
+      return;
+    }
+
+    // Charge Raid — release button  (crr:id)
+    if (customId.startsWith("crr:")) {
+      const id      = customId.slice(4);
+      const payload = messageStore.get(id);
+      if (!payload) {
+        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+        return;
+      }
+      const charged = payload.charged ?? 0;
+      if (charged === 0) {
+        await interaction.reply({ content: "Nothing charged yet.", ephemeral: true });
+        return;
+      }
+      payload.charged = 0;
+      await interaction.update({
+        content: `**Charge Raid** — firing **${charged}** messages...`,
+        components: getChargeRaidRows(id, 0),
+      });
+      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
+      for (let i = 0; i < charged; i++) {
+        try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
+        catch (err) { console.error("chargeraid fire error:", err); }
+      }
+      return;
+    }
+
+    // Charge Raid — reset button  (crz:id)
+    if (customId.startsWith("crz:")) {
+      const id      = customId.slice(4);
+      const payload = messageStore.get(id);
+      if (!payload) {
+        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+        return;
+      }
+      payload.charged = 0;
+      await interaction.update({
+        content: chargeRaidContent(payload.content, 0),
+        components: getChargeRaidRows(id, 0),
+      });
+      return;
+    }
+
+    // Raid buttons
     if (customId.startsWith("rfire:") || customId.startsWith("rmore:")) {
-      const colon      = customId.indexOf(":");
-      const action     = customId.slice(1, colon);
-      const id         = customId.slice(colon + 1);
-      const payload    = messageStore.get(id);
+      const colon   = customId.indexOf(":");
+      const action  = customId.slice(1, colon);
+      const id      = customId.slice(colon + 1);
+      const payload = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
         return;
@@ -585,26 +813,27 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
+    // Pollraid buttons
     if (customId.startsWith("pfire:") || customId.startsWith("pmore:")) {
-      const colon      = customId.indexOf(":");
-      const action     = customId.slice(1, colon);
-      const id         = customId.slice(colon + 1);
-      const payload    = messageStore.get(id);
+      const colon   = customId.indexOf(":");
+      const action  = customId.slice(1, colon);
+      const id      = customId.slice(colon + 1);
+      const payload = messageStore.get(id);
       if (!payload) {
         await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
         return;
       }
       const pollData = {
-        question: { text: payload.question },
-        answers: payload.answers.map((a) => ({ text: a })),
-        duration: payload.duration,
+        question:        { text: payload.question },
+        answers:         payload.answers.map((a) => ({ text: a })),
+        duration:        payload.duration,
         allowMultiselect: false,
       };
-      const count      = payload.count ?? 5;
+      const fireCount  = payload.count ?? 5;
       const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
       if (action === "fire") {
         await interaction.deferUpdate();
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < fireCount; i++) {
           try { await interaction.followUp({ poll: pollData }); await sleep(intervalMs); }
           catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
         }
@@ -612,7 +841,10 @@ client.on("interactionCreate", async (interaction) => {
       }
       if (action === "more") {
         await interaction.deferUpdate();
-        await interaction.followUp({ content: `Poll: ${payload.question}`, components: [getSpamRow("p", id)] });
+        await interaction.followUp({
+          content: `Poll: ${payload.question} — firing **${fireCount}** per click`,
+          components: [getSpamRow("p", id)],
+        });
         return;
       }
     }
