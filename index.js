@@ -133,6 +133,11 @@ const dmContacts = loadDmContacts();
 // ---------------------------------------------------------------------------
 // Charge Raid helpers
 // ---------------------------------------------------------------------------
+// IMPORTANT: every button in a message must have a UNIQUE custom ID.
+// We encode a position index into each ID so the 20 charge buttons are all
+// distinct, but the handler only needs the amount (parts[2]).
+// Format:  crc:<sessionId>:<amount>:<uniquePos>
+// ---------------------------------------------------------------------------
 
 function getChargeRaidRows(id, charged) {
   const rows = [];
@@ -142,10 +147,11 @@ function getChargeRaidRows(id, charged) {
     [10, 10, 10, 10, 10],
     [25, 25, 25, 25, 25],
   ];
+  let pos = 0;
   for (const amounts of grid) {
     const btns = amounts.map((n) =>
       new ButtonBuilder()
-        .setCustomId(`crc:${id}:${n}`)
+        .setCustomId(`crc:${id}:${n}:${pos++}`)   // pos makes every ID unique
         .setLabel(`+${n}`)
         .setStyle(ButtonStyle.Secondary)
     );
@@ -345,6 +351,18 @@ const viewHitlistCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const deleteHitlistCommand = new SlashCommandBuilder()
+  .setName("deletehitlist")
+  .setDescription("Remove a target from the hitlist")
+  .addStringOption((opt) =>
+    opt.setName("target").setDescription("Username or display name of the target to remove").setRequired(true).setAutocomplete(true)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 // ---------------------------------------------------------------------------
 // Register commands
 // ---------------------------------------------------------------------------
@@ -367,6 +385,7 @@ async function registerCommands(clientId) {
         freeNitroCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
+        deleteHitlistCommand.toJSON(),
       ],
     });
     console.log("Slash commands registered successfully.");
@@ -387,267 +406,302 @@ client.once("ready", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  try {
 
-  // -------------------------------------------------------------------------
-  // Autocomplete
-  // -------------------------------------------------------------------------
-  if (interaction.isAutocomplete()) {
-    const focused = interaction.options.getFocused().toLowerCase();
-    const cmd = interaction.commandName;
+    // -----------------------------------------------------------------------
+    // Autocomplete
+    // -----------------------------------------------------------------------
+    if (interaction.isAutocomplete()) {
+      const focused = interaction.options.getFocused().toLowerCase();
+      const cmd = interaction.commandName;
 
-    if (cmd === "dockingpointlocate" || cmd === "dockingpointdelete") {
-      const matches = [...dockingPoints.keys()]
-        .filter((n) => n.includes(focused))
-        .slice(0, 25)
-        .map((n) => ({ name: n, value: n }));
-      await interaction.respond(matches);
-      return;
-    }
-
-    if (cmd === "uploadhitlist") {
-      const matches = [...hitlist.values()]
-        .filter((e) =>
-          e.username.toLowerCase().includes(focused) ||
-          e.displayName.toLowerCase().includes(focused)
-        )
-        .slice(0, 25)
-        .map((e) => ({ name: `${e.username} (${e.displayName})`, value: e.username }));
-      await interaction.respond(matches);
-      return;
-    }
-
-    if (cmd === "viewhitlist") {
-      const matches = [...hitlist.values()]
-        .filter((e) =>
-          e.username.toLowerCase().includes(focused) ||
-          e.displayName.toLowerCase().includes(focused)
-        )
-        .slice(0, 25)
-        .map((e) => ({ name: `${e.displayName} (@${e.username})`, value: e.userId }));
-      await interaction.respond(matches);
-      return;
-    }
-
-    if (cmd === "terradm") {
-      const matches = [...dmContacts.values()]
-        .filter((c) => c.username.toLowerCase().includes(focused))
-        .slice(0, 25)
-        .map((c) => ({ name: `${c.username} (${c.userId})`, value: c.userId }));
-      await interaction.respond(matches);
-      return;
-    }
-
-    return;
-  }
-
-  // -------------------------------------------------------------------------
-  // Slash commands
-  // -------------------------------------------------------------------------
-  if (interaction.isChatInputCommand()) {
-
-    if (interaction.commandName === "say") {
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      await interaction.reply({ content: interaction.options.getString("message"), ephemeral });
-      return;
-    }
-
-    if (interaction.commandName === "raid") {
-      const text      = interaction.options.getString("message");
-      const interval  = interaction.options.getNumber("interval") ?? 1.0;
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      const id = storePayload({ type: "text", content: text, interval });
-      await interaction.reply({ content: text, components: [getSpamRow("r", id)], ephemeral });
-      return;
-    }
-
-    if (interaction.commandName === "pollraid") {
-      const useDefault = interaction.options.getBoolean("use_default");
-      const duration   = interaction.options.getInteger("duration") ?? 24;
-      const count      = interaction.options.getInteger("count") ?? 5;
-      const interval   = interaction.options.getNumber("interval") ?? 1.0;
-      const ephemeral  = interaction.options.getBoolean("ephemeral") ?? false;
-      let question, answers;
-
-      if (useDefault) {
-        question = "Who Wins?";
-        answers = ["L", "I", "B", "E", "R", "T", "Y"];
-      } else {
-        question = interaction.options.getString("question");
-        const rawAnswers = interaction.options.getString("answers");
-        if (!question || !rawAnswers) {
-          await interaction.reply({ content: "Provide both a question and answers, or set use_default to True.", ephemeral: true });
-          return;
-        }
-        answers = rawAnswers.split(",").map((a) => a.trim()).filter(Boolean);
-        if (answers.length < 2) {
-          await interaction.reply({ content: "Provide at least 2 answers.", ephemeral: true });
-          return;
-        }
-        if (answers.length > 10) {
-          await interaction.reply({ content: "Discord polls support a maximum of 10 answers.", ephemeral: true });
-          return;
-        }
-      }
-
-      const id = storePayload({ type: "poll", question, answers, duration, count, interval });
-      await interaction.reply({
-        content: `Poll: ${question} — firing **${count}** per click`,
-        components: [getSpamRow("p", id)],
-        ephemeral,
-      });
-      return;
-    }
-
-    if (interaction.commandName === "chargeraid") {
-      const text      = interaction.options.getString("message");
-      const interval  = interaction.options.getNumber("interval") ?? 1.0;
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      const id = storePayload({ type: "chargeraid", content: text, interval, charged: 0 });
-      await interaction.reply({
-        content: chargeRaidContent(text, 0),
-        components: getChargeRaidRows(id, 0),
-        ephemeral,
-      });
-      return;
-    }
-
-    if (interaction.commandName === "terraform") {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("terraform:confirm").setLabel("Yes, archive this server").setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId("terraform:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
-      );
-      await interaction.reply({
-        content: `Archive **${interaction.guild.name}**?\n\nThis will delete every channel, every non-default role, and rename the server to **[Archived Server]**. This cannot be undone.`,
-        components: [row],
-        ephemeral: true,
-      });
-      return;
-    }
-
-    if (interaction.commandName === "terradm") {
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      await interaction.deferReply({ ephemeral });
-      try {
-        const userId  = interaction.options.getString("userid").trim();
-        const message = interaction.options.getString("message").trim();
-
-        let user;
-        try {
-          user = await client.users.fetch(userId);
-        } catch {
-          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
-          return;
-        }
-
-        try {
-          await user.send(message);
-        } catch {
-          await interaction.editReply({ content: `Could not send a DM to **${user.username}**. They may have DMs disabled or we share no mutual servers.` });
-          return;
-        }
-
-        dmContacts.set(userId, { userId, username: user.username });
-        saveDmContacts();
-
-        await interaction.editReply({ content: `DM sent to **${user.username}** (${userId}).` });
-      } catch (err) {
-        console.error("terradm error:", err);
-        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
-      }
-      return;
-    }
-
-    if (interaction.commandName === "dockingpointset") {
-      const name      = interaction.options.getString("name");
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral });
-      const reply = await interaction.fetchReply();
-      const guildOrDM = interaction.guildId ?? "@me";
-      const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
-      dockingPoints.set(name.toLowerCase(), url);
-      saveDockingPoints();
-      return;
-    }
-
-    if (interaction.commandName === "dockingpointlocate") {
-      const name      = interaction.options.getString("name");
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      const url = dockingPoints.get(name.toLowerCase());
-      if (!url) {
-        await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
+      if (cmd === "dockingpointlocate" || cmd === "dockingpointdelete") {
+        const matches = [...dockingPoints.keys()]
+          .filter((n) => n.includes(focused))
+          .slice(0, 25)
+          .map((n) => ({ name: n, value: n }));
+        await interaction.respond(matches);
         return;
       }
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setLabel(`Jump to: ${name}`).setURL(url).setStyle(ButtonStyle.Link)
-      );
-      await interaction.reply({ content: `Docking point **${name}**`, components: [row], ephemeral });
-      return;
-    }
 
-    if (interaction.commandName === "dockingpointdelete") {
-      const name = interaction.options.getString("name").toLowerCase();
-      if (!dockingPoints.has(name)) {
-        await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
+      if (cmd === "uploadhitlist") {
+        const matches = [...hitlist.values()]
+          .filter((e) =>
+            e.username.toLowerCase().includes(focused) ||
+            e.displayName.toLowerCase().includes(focused)
+          )
+          .slice(0, 25)
+          .map((e) => ({ name: `${e.username} (${e.displayName})`, value: e.username }));
+        await interaction.respond(matches);
         return;
       }
-      dockingPoints.delete(name);
-      saveDockingPoints();
-      await interaction.reply({ content: `Docking point **${name}** deleted.`, ephemeral: true });
+
+      if (cmd === "viewhitlist" || cmd === "deletehitlist") {
+        const matches = [...hitlist.values()]
+          .filter((e) =>
+            e.username.toLowerCase().includes(focused) ||
+            e.displayName.toLowerCase().includes(focused)
+          )
+          .slice(0, 25)
+          .map((e) => ({ name: `${e.displayName} (@${e.username})`, value: e.userId }));
+        await interaction.respond(matches);
+        return;
+      }
+
+      if (cmd === "terradm") {
+        const matches = [...dmContacts.values()]
+          .filter((c) => c.username.toLowerCase().includes(focused))
+          .slice(0, 25)
+          .map((c) => ({ name: `${c.username} (${c.userId})`, value: c.userId }));
+        await interaction.respond(matches);
+        return;
+      }
+
       return;
     }
 
-    if (interaction.commandName === "freenitro") {
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("freenitro:claim").setLabel("Claim Free Nitro").setStyle(ButtonStyle.Primary)
-      );
-      await interaction.reply({
-        content: "You have been gifted Discord Nitro! Click below to claim it before it expires.",
-        components: [row],
-        ephemeral,
-      });
-      return;
-    }
+    // -----------------------------------------------------------------------
+    // Slash commands
+    // -----------------------------------------------------------------------
+    if (interaction.isChatInputCommand()) {
 
-    if (interaction.commandName === "uploadhitlist") {
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      await interaction.deferReply({ ephemeral });
-      try {
-        const userId      = interaction.options.getString("userid").trim();
-        const displayName = interaction.options.getString("displayname").trim();
-        const threatLevel = interaction.options.getInteger("threatlevel");
+      if (interaction.commandName === "say") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.reply({ content: interaction.options.getString("message"), ephemeral });
+        return;
+      }
 
-        let avatarUrl, username;
-        try {
-          const user = await client.users.fetch(userId);
-          avatarUrl = user.displayAvatarURL({ size: 256, extension: "png" });
-          username  = interaction.options.getString("username")?.trim() || user.username;
-        } catch {
-          await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
-          return;
+      if (interaction.commandName === "raid") {
+        const text      = interaction.options.getString("message");
+        const interval  = interaction.options.getNumber("interval") ?? 1.0;
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        const id = storePayload({ type: "text", content: text, interval });
+        await interaction.reply({ content: text, components: [getSpamRow("r", id)], ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === "pollraid") {
+        const useDefault = interaction.options.getBoolean("use_default");
+        const duration   = interaction.options.getInteger("duration") ?? 24;
+        const count      = interaction.options.getInteger("count") ?? 5;
+        const interval   = interaction.options.getNumber("interval") ?? 1.0;
+        const ephemeral  = interaction.options.getBoolean("ephemeral") ?? false;
+        let question, answers;
+
+        if (useDefault) {
+          question = "Who Wins?";
+          answers = ["L", "I", "B", "E", "R", "T", "Y"];
+        } else {
+          question = interaction.options.getString("question");
+          const rawAnswers = interaction.options.getString("answers");
+          if (!question || !rawAnswers) {
+            await interaction.reply({ content: "Provide both a question and answers, or set use_default to True.", ephemeral: true });
+            return;
+          }
+          answers = rawAnswers.split(",").map((a) => a.trim()).filter(Boolean);
+          if (answers.length < 2) {
+            await interaction.reply({ content: "Provide at least 2 answers.", ephemeral: true });
+            return;
+          }
+          if (answers.length > 10) {
+            await interaction.reply({ content: "Discord polls support a maximum of 10 answers.", ephemeral: true });
+            return;
+          }
         }
 
-        const entry = { userId, username, displayName, avatarUrl, threatLevel };
-        hitlist.set(userId, entry);
-        saveHitlist();
-
-        const threat = THREAT[threatLevel];
-        await interaction.editReply({
-          content: `**${displayName}** added to the hitlist. Threat level: **${threat.name} (${threat.label})**`,
-          embeds: [buildHitlistEmbed(entry)],
+        const id = storePayload({ type: "poll", question, answers, duration, count, interval });
+        await interaction.reply({
+          content: `Poll: ${question} — firing **${count}** per click`,
+          components: [getSpamRow("p", id)],
+          ephemeral,
         });
-      } catch (err) {
-        console.error("uploadhitlist error:", err);
-        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
+        return;
       }
-      return;
-    }
 
-    if (interaction.commandName === "viewhitlist") {
-      const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-      await interaction.deferReply({ ephemeral });
-      try {
+      if (interaction.commandName === "chargeraid") {
+        const text      = interaction.options.getString("message");
+        const interval  = interaction.options.getNumber("interval") ?? 1.0;
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        const id = storePayload({ type: "chargeraid", content: text, interval, charged: 0 });
+        await interaction.reply({
+          content: chargeRaidContent(text, 0),
+          components: getChargeRaidRows(id, 0),
+          ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.commandName === "terraform") {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("terraform:confirm").setLabel("Yes, archive this server").setStyle(ButtonStyle.Danger),
+          new ButtonBuilder().setCustomId("terraform:cancel").setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+        );
+        await interaction.reply({
+          content: `Archive **${interaction.guild.name}**?\n\nThis will delete every channel, every non-default role, and rename the server to **[Archived Server]**. This cannot be undone.`,
+          components: [row],
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (interaction.commandName === "terradm") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.deferReply({ ephemeral });
+        try {
+          const userId  = interaction.options.getString("userid").trim();
+          const message = interaction.options.getString("message").trim();
+
+          let user;
+          try {
+            user = await client.users.fetch(userId, { force: true });
+          } catch {
+            await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
+            return;
+          }
+
+          // createDM opens the DM channel via REST — works without a mutual server
+          let dmChannel;
+          try {
+            dmChannel = await user.createDM(true);
+          } catch {
+            await interaction.editReply({ content: `Could not open a DM channel with **${user.username}**.` });
+            return;
+          }
+
+          try {
+            await dmChannel.send(message);
+          } catch {
+            await interaction.editReply({ content: `Could not send a DM to **${user.username}**. They may have DMs disabled.` });
+            return;
+          }
+
+          dmContacts.set(userId, { userId, username: user.username });
+          saveDmContacts();
+
+          await interaction.editReply({ content: `DM sent to **${user.username}** (${userId}).` });
+        } catch (err) {
+          console.error("terradm error:", err);
+          try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
+        }
+        return;
+      }
+
+      if (interaction.commandName === "dockingpointset") {
+        const name      = interaction.options.getString("name");
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral });
+        const reply = await interaction.fetchReply();
+        const guildOrDM = interaction.guildId ?? "@me";
+        const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
+        dockingPoints.set(name.toLowerCase(), url);
+        saveDockingPoints();
+        return;
+      }
+
+      if (interaction.commandName === "dockingpointlocate") {
+        const name      = interaction.options.getString("name");
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        const url = dockingPoints.get(name.toLowerCase());
+        if (!url) {
+          await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
+          return;
+        }
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel(`Jump to: ${name}`).setURL(url).setStyle(ButtonStyle.Link)
+        );
+        await interaction.reply({ content: `Docking point **${name}**`, components: [row], ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === "dockingpointdelete") {
+        const name = interaction.options.getString("name").toLowerCase();
+        if (!dockingPoints.has(name)) {
+          await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
+          return;
+        }
+        dockingPoints.delete(name);
+        saveDockingPoints();
+        await interaction.reply({ content: `Docking point **${name}** deleted.`, ephemeral: true });
+        return;
+      }
+
+      if (interaction.commandName === "freenitro") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("freenitro:claim").setLabel("Claim Free Nitro").setStyle(ButtonStyle.Primary)
+        );
+        await interaction.reply({
+          content: "You have been gifted Discord Nitro! Click below to claim it before it expires.",
+          components: [row],
+          ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.commandName === "uploadhitlist") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.deferReply({ ephemeral });
+        try {
+          const userId      = interaction.options.getString("userid").trim();
+          const displayName = interaction.options.getString("displayname").trim();
+          const threatLevel = interaction.options.getInteger("threatlevel");
+
+          let avatarUrl, username;
+          try {
+            const user = await client.users.fetch(userId, { force: true });
+            avatarUrl = user.displayAvatarURL({ size: 256, extension: "png" });
+            username  = interaction.options.getString("username")?.trim() || user.username;
+          } catch {
+            await interaction.editReply({ content: `Could not find a Discord user with ID **${userId}**.` });
+            return;
+          }
+
+          const entry = { userId, username, displayName, avatarUrl, threatLevel };
+          hitlist.set(userId, entry);
+          saveHitlist();
+
+          const threat = THREAT[threatLevel];
+          await interaction.editReply({
+            content: `**${displayName}** added to the hitlist. Threat level: **${threat.name} (${threat.label})**`,
+            embeds: [buildHitlistEmbed(entry)],
+          });
+        } catch (err) {
+          console.error("uploadhitlist error:", err);
+          try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
+        }
+        return;
+      }
+
+      if (interaction.commandName === "viewhitlist") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.deferReply({ ephemeral });
+        try {
+          const targetInput = interaction.options.getString("target");
+          let entry = hitlist.get(targetInput);
+          if (!entry) {
+            const lower = targetInput.toLowerCase();
+            entry = [...hitlist.values()].find(
+              (e) =>
+                e.username.toLowerCase() === lower ||
+                e.displayName.toLowerCase() === lower
+            );
+          }
+          if (!entry) {
+            await interaction.editReply({ content: `No hitlist entry found for **${targetInput}**.` });
+            return;
+          }
+          await interaction.editReply({ embeds: [buildHitlistEmbed(entry)] });
+        } catch (err) {
+          console.error("viewhitlist error:", err);
+          try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
+        }
+        return;
+      }
+
+      if (interaction.commandName === "deletehitlist") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
         const targetInput = interaction.options.getString("target");
+
         let entry = hitlist.get(targetInput);
         if (!entry) {
           const lower = targetInput.toLowerCase();
@@ -658,196 +712,213 @@ client.on("interactionCreate", async (interaction) => {
           );
         }
         if (!entry) {
-          await interaction.editReply({ content: `No hitlist entry found for **${targetInput}**.` });
+          await interaction.reply({ content: `No hitlist entry found for **${targetInput}**.`, ephemeral: true });
           return;
         }
-        await interaction.editReply({ embeds: [buildHitlistEmbed(entry)] });
-      } catch (err) {
-        console.error("viewhitlist error:", err);
-        try { await interaction.editReply({ content: "Something went wrong. Check the bot logs." }); } catch (_) {}
-      }
-      return;
-    }
-  }
 
-  // -------------------------------------------------------------------------
-  // Button interactions
-  // -------------------------------------------------------------------------
-  if (interaction.isButton()) {
-    const customId = interaction.customId;
-
-    // Free Nitro
-    if (customId === "freenitro:claim") {
-      await interaction.update({
-        content: "https://media.tenor.com/x8v1oNUOmg4AAAAd/rickroll-roll.gif",
-        components: [],
-      });
-      return;
-    }
-
-    // Terraform
-    if (customId === "terraform:cancel") {
-      await interaction.update({ content: "Cancelled.", components: [] });
-      return;
-    }
-
-    if (customId === "terraform:confirm") {
-      const guild = interaction.guild;
-      const botMember = guild.members.me;
-      if (botMember) {
-        const missing = botMember.permissions.missing([
-          PermissionFlagsBits.ManageChannels,
-          PermissionFlagsBits.ManageRoles,
-          PermissionFlagsBits.ManageGuild,
-        ]);
-        if (missing.length > 0) {
-          await interaction.update({
-            content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
-            components: [],
-          });
-          return;
-        }
-      }
-      await interaction.update({ content: "Archiving server...", components: [] });
-      try {
-        const channels = await guild.channels.fetch();
-        for (const [, ch] of channels) {
-          if (!ch) continue;
-          try { await ch.delete(); } catch (_) {}
-        }
-      } catch (err) { console.error("Terraform channel error:", err); }
-      try {
-        const roles = await guild.roles.fetch();
-        for (const [, role] of roles) {
-          if (!role || role.managed || role.name === "@everyone") continue;
-          try { await role.delete(); } catch (_) {}
-        }
-      } catch (err) { console.error("Terraform role error:", err); }
-      try { await guild.setName("[Archived Server]"); } catch (_) {}
-      return;
-    }
-
-    // Charge Raid — charge button  (crc:id:amount)
-    if (customId.startsWith("crc:")) {
-      const parts   = customId.split(":");
-      const id      = parts[1];
-      const amount  = parseInt(parts[2], 10);
-      const payload = messageStore.get(id);
-      if (!payload) {
-        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
-        return;
-      }
-      payload.charged = (payload.charged ?? 0) + amount;
-      await interaction.update({
-        content: chargeRaidContent(payload.content, payload.charged),
-        components: getChargeRaidRows(id, payload.charged),
-      });
-      return;
-    }
-
-    // Charge Raid — release button  (crr:id)
-    if (customId.startsWith("crr:")) {
-      const id      = customId.slice(4);
-      const payload = messageStore.get(id);
-      if (!payload) {
-        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
-        return;
-      }
-      const charged = payload.charged ?? 0;
-      if (charged === 0) {
-        await interaction.reply({ content: "Nothing charged yet.", ephemeral: true });
-        return;
-      }
-      payload.charged = 0;
-      await interaction.update({
-        content: `**Charge Raid** — firing **${charged}** messages...`,
-        components: getChargeRaidRows(id, 0),
-      });
-      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
-      for (let i = 0; i < charged; i++) {
-        try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
-        catch (err) { console.error("chargeraid fire error:", err); }
-      }
-      return;
-    }
-
-    // Charge Raid — reset button  (crz:id)
-    if (customId.startsWith("crz:")) {
-      const id      = customId.slice(4);
-      const payload = messageStore.get(id);
-      if (!payload) {
-        await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
-        return;
-      }
-      payload.charged = 0;
-      await interaction.update({
-        content: chargeRaidContent(payload.content, 0),
-        components: getChargeRaidRows(id, 0),
-      });
-      return;
-    }
-
-    // Raid buttons
-    if (customId.startsWith("rfire:") || customId.startsWith("rmore:")) {
-      const colon   = customId.indexOf(":");
-      const action  = customId.slice(1, colon);
-      const id      = customId.slice(colon + 1);
-      const payload = messageStore.get(id);
-      if (!payload) {
-        await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
-        return;
-      }
-      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
-      if (action === "fire") {
-        await interaction.deferUpdate();
-        for (let i = 0; i < 5; i++) {
-          try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
-          catch (err) { console.error("raid followUp error:", err); }
-        }
-        return;
-      }
-      if (action === "more") {
-        await interaction.deferUpdate();
-        await interaction.followUp({ content: payload.content, components: [getSpamRow("r", id)] });
-        return;
-      }
-    }
-
-    // Pollraid buttons
-    if (customId.startsWith("pfire:") || customId.startsWith("pmore:")) {
-      const colon   = customId.indexOf(":");
-      const action  = customId.slice(1, colon);
-      const id      = customId.slice(colon + 1);
-      const payload = messageStore.get(id);
-      if (!payload) {
-        await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
-        return;
-      }
-      const pollData = {
-        question:        { text: payload.question },
-        answers:         payload.answers.map((a) => ({ text: a })),
-        duration:        payload.duration,
-        allowMultiselect: false,
-      };
-      const fireCount  = payload.count ?? 5;
-      const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
-      if (action === "fire") {
-        await interaction.deferUpdate();
-        for (let i = 0; i < fireCount; i++) {
-          try { await interaction.followUp({ poll: pollData }); await sleep(intervalMs); }
-          catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
-        }
-        return;
-      }
-      if (action === "more") {
-        await interaction.deferUpdate();
-        await interaction.followUp({
-          content: `Poll: ${payload.question} — firing **${fireCount}** per click`,
-          components: [getSpamRow("p", id)],
+        hitlist.delete(entry.userId);
+        saveHitlist();
+        await interaction.reply({
+          content: `**${entry.displayName}** (@${entry.username}) removed from the hitlist.`,
+          ephemeral,
         });
         return;
       }
     }
+
+    // -----------------------------------------------------------------------
+    // Button interactions
+    // -----------------------------------------------------------------------
+    if (interaction.isButton()) {
+      const customId = interaction.customId;
+
+      // Free Nitro
+      if (customId === "freenitro:claim") {
+        await interaction.update({
+          content: "https://media.tenor.com/x8v1oNUOmg4AAAAd/rickroll-roll.gif",
+          components: [],
+        });
+        return;
+      }
+
+      // Terraform
+      if (customId === "terraform:cancel") {
+        await interaction.update({ content: "Cancelled.", components: [] });
+        return;
+      }
+
+      if (customId === "terraform:confirm") {
+        const guild = interaction.guild;
+        const botMember = guild.members.me;
+        if (botMember) {
+          const missing = botMember.permissions.missing([
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.ManageRoles,
+            PermissionFlagsBits.ManageGuild,
+          ]);
+          if (missing.length > 0) {
+            await interaction.update({
+              content: `The bot is missing permissions: **${missing.join(", ")}**. Re-invite it with Administrator.`,
+              components: [],
+            });
+            return;
+          }
+        }
+        await interaction.update({ content: "Archiving server...", components: [] });
+        try {
+          const channels = await guild.channels.fetch();
+          for (const [, ch] of channels) {
+            if (!ch) continue;
+            try { await ch.delete(); } catch (_) {}
+          }
+        } catch (err) { console.error("Terraform channel error:", err); }
+        try {
+          const roles = await guild.roles.fetch();
+          for (const [, role] of roles) {
+            if (!role || role.managed || role.name === "@everyone") continue;
+            try { await role.delete(); } catch (_) {}
+          }
+        } catch (err) { console.error("Terraform role error:", err); }
+        try { await guild.setName("[Archived Server]"); } catch (_) {}
+        return;
+      }
+
+      // Charge Raid — charge button  (crc:sessionId:amount:uniquePos)
+      if (customId.startsWith("crc:")) {
+        const parts   = customId.split(":");
+        const id      = parts[1];
+        const amount  = parseInt(parts[2], 10);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+          return;
+        }
+        payload.charged = (payload.charged ?? 0) + amount;
+        await interaction.update({
+          content: chargeRaidContent(payload.content, payload.charged),
+          components: getChargeRaidRows(id, payload.charged),
+        });
+        return;
+      }
+
+      // Charge Raid — release button  (crr:sessionId)
+      if (customId.startsWith("crr:")) {
+        const id      = customId.slice(4);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+          return;
+        }
+        const charged = payload.charged ?? 0;
+        if (charged === 0) {
+          await interaction.reply({ content: "Nothing charged yet.", ephemeral: true });
+          return;
+        }
+        payload.charged = 0;
+        await interaction.update({
+          content: `**Charge Raid** — firing **${charged}** messages...`,
+          components: getChargeRaidRows(id, 0),
+        });
+        const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
+        for (let i = 0; i < charged; i++) {
+          try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
+          catch (err) { console.error("chargeraid fire error:", err); }
+        }
+        return;
+      }
+
+      // Charge Raid — reset button  (crz:sessionId)
+      if (customId.startsWith("crz:")) {
+        const id      = customId.slice(4);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /chargeraid again.", ephemeral: true });
+          return;
+        }
+        payload.charged = 0;
+        await interaction.update({
+          content: chargeRaidContent(payload.content, 0),
+          components: getChargeRaidRows(id, 0),
+        });
+        return;
+      }
+
+      // Raid buttons
+      if (customId.startsWith("rfire:") || customId.startsWith("rmore:")) {
+        const colon   = customId.indexOf(":");
+        const action  = customId.slice(1, colon);
+        const id      = customId.slice(colon + 1);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run the command again.", ephemeral: true });
+          return;
+        }
+        const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
+        if (action === "fire") {
+          await interaction.deferUpdate();
+          for (let i = 0; i < 5; i++) {
+            try { await interaction.followUp({ content: payload.content }); await sleep(intervalMs); }
+            catch (err) { console.error("raid followUp error:", err); }
+          }
+          return;
+        }
+        if (action === "more") {
+          await interaction.deferUpdate();
+          await interaction.followUp({ content: payload.content, components: [getSpamRow("r", id)] });
+          return;
+        }
+      }
+
+      // Pollraid buttons
+      if (customId.startsWith("pfire:") || customId.startsWith("pmore:")) {
+        const colon   = customId.indexOf(":");
+        const action  = customId.slice(1, colon);
+        const id      = customId.slice(colon + 1);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /pollraid again.", ephemeral: true });
+          return;
+        }
+        const pollData = {
+          question:         { text: payload.question },
+          answers:          payload.answers.map((a) => ({ text: a })),
+          duration:         payload.duration,
+          allowMultiselect: false,
+        };
+        const fireCount  = payload.count ?? 5;
+        const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
+        if (action === "fire") {
+          await interaction.deferUpdate();
+          for (let i = 0; i < fireCount; i++) {
+            try { await interaction.followUp({ poll: pollData }); await sleep(intervalMs); }
+            catch (err) { console.error(`pollraid followUp ${i + 1} error:`, err); }
+          }
+          return;
+        }
+        if (action === "more") {
+          await interaction.deferUpdate();
+          await interaction.followUp({
+            content: `Poll: ${payload.question} — firing **${fireCount}** per click`,
+            components: [getSpamRow("p", id)],
+          });
+          return;
+        }
+      }
+    }
+
+  } catch (err) {
+    // Top-level catch — logs the error and attempts to respond so Discord
+    // never sees "application did not respond"
+    console.error("interactionCreate error:", err);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "Something went wrong. Check the bot logs." });
+      } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+        await interaction.update({ content: "Something went wrong.", components: [] });
+      } else {
+        await interaction.reply({ content: "Something went wrong. Check the bot logs.", ephemeral: true });
+      }
+    } catch (_) {}
   }
 });
 
