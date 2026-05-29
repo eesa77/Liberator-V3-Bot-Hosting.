@@ -314,6 +314,15 @@ const freeNitroCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const anthemCommand = new SlashCommandBuilder()
+  .setName("anthem")
+  .setDescription("Post the Liberator V3 bot hosting link")
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const uploadHitlistCommand = new SlashCommandBuilder()
   .setName("uploadhitlist")
   .setDescription("Add or update a target on the hitlist")
@@ -383,6 +392,7 @@ async function registerCommands(clientId) {
         dockingLocateCommand.toJSON(),
         dockingDeleteCommand.toJSON(),
         freeNitroCommand.toJSON(),
+        anthemCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
         deleteHitlistCommand.toJSON(),
@@ -622,6 +632,12 @@ client.on("interactionCreate", async (interaction) => {
         dockingPoints.delete(name);
         saveDockingPoints();
         await interaction.reply({ content: `Docking point **${name}** deleted.`, ephemeral: true });
+        return;
+      }
+
+      if (interaction.commandName === "anthem") {
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        await interaction.reply({ content: "https://github.com/eesa77/Liberator-V3-Bot-Hosting", ephemeral });
         return;
       }
 
