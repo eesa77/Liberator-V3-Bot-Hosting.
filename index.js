@@ -637,7 +637,7 @@ client.on("interactionCreate", async (interaction) => {
 
       if (interaction.commandName === "anthem") {
         const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-        await interaction.reply({ content: "https://github.com/eesa77/Liberator-V3-Bot-Hosting", ephemeral });
+        await interaction.reply({ content: "https://youtube.com/shorts/T9KK2udDHNo?si=6aGsKcsObNUMC9KD", ephemeral });
         return;
       }
 
