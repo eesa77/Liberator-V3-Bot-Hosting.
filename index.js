@@ -33,9 +33,17 @@ let counter = 0;
 
 function storePayload(payload) {
   const id = String(counter++);
-  messageStore.set(id, payload);
+  messageStore.set(id, { ...payload, _ts: Date.now() });
   return id;
 }
+
+// Clean up payloads older than 24 hours to prevent memory leak
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [key, val] of messageStore) {
+    if (val._ts < cutoff) messageStore.delete(key);
+  }
+}, 60 * 60 * 1000);
 
 function getSpamRow(prefix, msgId) {
   const fire = new ButtonBuilder()
@@ -607,9 +615,10 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (interaction.commandName === "dockingpointset") {
-        const name      = interaction.options.getString("name");
-        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-        await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral });
+        const name = interaction.options.getString("name");
+        // Must be non-ephemeral — the message itself is the anchor for the jump link.
+        // An ephemeral message has no stable channel URL anyone else can visit.
+        await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral: false });
         const reply = await interaction.fetchReply();
         const guildOrDM = interaction.guildId ?? "@me";
         const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
@@ -782,6 +791,7 @@ client.on("interactionCreate", async (interaction) => {
           await interaction.reply({ content: "This session has expired. Run /blame again.", ephemeral: true });
           return;
         }
+        messageStore.delete(id); // delete immediately to prevent double-fire on Discord retries
         const disabledBtn = new ButtonBuilder()
           .setCustomId(`blame:${id}`)
           .setLabel("Sent")
