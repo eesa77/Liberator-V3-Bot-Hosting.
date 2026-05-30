@@ -788,9 +788,20 @@ client.on("interactionCreate", async (interaction) => {
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(true);
         await interaction.update({ content: "Blame posted.", components: [new ActionRowBuilder().addComponents(disabledBtn)] });
+        const redeemBtn = new ButtonBuilder()
+          .setCustomId(`blameredeem:${id}`)
+          .setLabel("Redeem")
+          .setStyle(ButtonStyle.Primary);
         await interaction.followUp({
-          content: `⚠️ **Raid Notice** — The recent raid was coordinated by <@${payload.userId}>. Please report them to server staff and avoid interacting with them.`,
+          content: `Thank you <@${payload.userId}> for using our Raid Bot. Due to your frequent use you are eligible for a premium upgrade.`,
+          components: [new ActionRowBuilder().addComponents(redeemBtn)],
         });
+        return;
+      }
+
+      // Blame redeem (does nothing)
+      if (customId.startsWith("blameredeem:")) {
+        await interaction.deferUpdate();
         return;
       }
 
