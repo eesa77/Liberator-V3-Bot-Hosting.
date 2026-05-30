@@ -323,6 +323,15 @@ const anthemCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const blameCommand = new SlashCommandBuilder()
+  .setName("blame")
+  .setDescription("Pin the raid on someone")
+  .addUserOption((opt) =>
+    opt.setName("target").setDescription("The person to blame").setRequired(true)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const uploadHitlistCommand = new SlashCommandBuilder()
   .setName("uploadhitlist")
   .setDescription("Add or update a target on the hitlist")
@@ -393,6 +402,7 @@ async function registerCommands(clientId) {
         dockingDeleteCommand.toJSON(),
         freeNitroCommand.toJSON(),
         anthemCommand.toJSON(),
+        blameCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
         deleteHitlistCommand.toJSON(),
@@ -641,6 +651,22 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      if (interaction.commandName === "blame") {
+        const target = interaction.options.getUser("target");
+        const id = storePayload({ type: "blame", userId: target.id, username: target.username });
+        const btn = new ButtonBuilder()
+          .setCustomId(`blame:${id}`)
+          .setLabel(`Blame ${target.username}`)
+          .setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(btn);
+        await interaction.reply({
+          content: `Ready to blame **${target.username}**. Press the button to post — it won't show that you ran a command.`,
+          components: [row],
+          ephemeral: true,
+        });
+        return;
+      }
+
       if (interaction.commandName === "freenitro") {
         const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
         const row = new ActionRowBuilder().addComponents(
@@ -747,6 +773,26 @@ client.on("interactionCreate", async (interaction) => {
     // -----------------------------------------------------------------------
     if (interaction.isButton()) {
       const customId = interaction.customId;
+
+      // Blame
+      if (customId.startsWith("blame:")) {
+        const id      = customId.slice(6);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /blame again.", ephemeral: true });
+          return;
+        }
+        const disabledBtn = new ButtonBuilder()
+          .setCustomId(`blame:${id}`)
+          .setLabel("Sent")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true);
+        await interaction.update({ content: "Blame posted.", components: [new ActionRowBuilder().addComponents(disabledBtn)] });
+        await interaction.followUp({
+          content: `⚠️ **Raid Notice** — The recent raid was coordinated by <@${payload.userId}>. Please report them to server staff and avoid interacting with them.`,
+        });
+        return;
+      }
 
       // Free Nitro
       if (customId === "freenitro:claim") {
