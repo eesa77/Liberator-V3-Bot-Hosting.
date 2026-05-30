@@ -284,7 +284,7 @@ const dockingSetCommand = new SlashCommandBuilder()
     opt.setName("name").setDescription("Name for this docking point").setRequired(true)
   )
   .addBooleanOption((opt) =>
-    opt.setName("ephemeral").setDescription("Only you can see the response").setRequired(false)
+    opt.setName("private").setDescription("Only you can jump to this docking point (link shown ephemerally on locate)").setRequired(false)
   )
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
@@ -615,26 +615,29 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       if (interaction.commandName === "dockingpointset") {
-        const name = interaction.options.getString("name");
-        // Must be non-ephemeral — the message itself is the anchor for the jump link.
-        // An ephemeral message has no stable channel URL anyone else can visit.
-        await interaction.reply({ content: `Docking point **${name}** set here. Use /dockingpointlocate to jump back.`, ephemeral: false });
+        const name      = interaction.options.getString("name");
+        const isPrivate = interaction.options.getBoolean("private") ?? false;
+        // Anchor message must always be non-ephemeral — it needs a real channel URL.
+        await interaction.reply({ content: `Docking point **${name}** set here${isPrivate ? " (private)" : ""}. Use /dockingpointlocate to jump back.`, ephemeral: false });
         const reply = await interaction.fetchReply();
         const guildOrDM = interaction.guildId ?? "@me";
         const url = `https://discord.com/channels/${guildOrDM}/${reply.channelId}/${reply.id}`;
-        dockingPoints.set(name.toLowerCase(), url);
+        dockingPoints.set(name.toLowerCase(), { url, private: isPrivate });
         saveDockingPoints();
         return;
       }
 
       if (interaction.commandName === "dockingpointlocate") {
-        const name      = interaction.options.getString("name");
-        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-        const url = dockingPoints.get(name.toLowerCase());
-        if (!url) {
+        const name    = interaction.options.getString("name");
+        const stored  = dockingPoints.get(name.toLowerCase());
+        if (!stored) {
           await interaction.reply({ content: `No docking point named **${name}** found.`, ephemeral: true });
           return;
         }
+        // Support old string format and new object format { url, private }
+        const url       = typeof stored === "string" ? stored : stored.url;
+        const isPrivate = typeof stored === "string" ? false  : stored.private;
+        const ephemeral = isPrivate || (interaction.options.getBoolean("ephemeral") ?? false);
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setLabel(`Jump to: ${name}`).setURL(url).setStyle(ButtonStyle.Link)
         );
