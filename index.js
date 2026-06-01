@@ -340,6 +340,18 @@ const blameCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const fakeMessageCommand = new SlashCommandBuilder()
+  .setName("fakeamessage")
+  .setDescription("Stage a fake deleted message recovery from any user")
+  .addStringOption((opt) =>
+    opt.setName("userid").setDescription("Discord User ID of the 'sender'").setRequired(true)
+  )
+  .addStringOption((opt) =>
+    opt.setName("message").setDescription("The message to show as deleted").setRequired(true)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const uploadHitlistCommand = new SlashCommandBuilder()
   .setName("uploadhitlist")
   .setDescription("Add or update a target on the hitlist")
@@ -411,6 +423,7 @@ async function registerCommands(clientId) {
         freeNitroCommand.toJSON(),
         anthemCommand.toJSON(),
         blameCommand.toJSON(),
+        fakeMessageCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
         deleteHitlistCommand.toJSON(),
@@ -663,6 +676,22 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      if (interaction.commandName === "fakeamessage") {
+        const userId  = interaction.options.getString("userid").trim();
+        const message = interaction.options.getString("message").trim();
+        const id = storePayload({ type: "fakemsg", userId, message });
+        const btn = new ButtonBuilder()
+          .setCustomId(`fakemsg:${id}`)
+          .setLabel("Say")
+          .setStyle(ButtonStyle.Primary);
+        await interaction.reply({
+          content: `Ready to fake a deleted message from **${userId}**. Press Say to fire it.`,
+          components: [new ActionRowBuilder().addComponents(btn)],
+          ephemeral: true,
+        });
+        return;
+      }
+
       if (interaction.commandName === "blame") {
         const target = interaction.options.getUser("target");
         const id = storePayload({ type: "blame", userId: target.id, username: target.username });
@@ -785,6 +814,48 @@ client.on("interactionCreate", async (interaction) => {
     // -----------------------------------------------------------------------
     if (interaction.isButton()) {
       const customId = interaction.customId;
+
+      // Fake message
+      if (customId.startsWith("fakemsg:")) {
+        const id      = customId.slice(8);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /fakeamessage again.", ephemeral: true });
+          return;
+        }
+        messageStore.delete(id);
+
+        let user;
+        try {
+          user = await client.users.fetch(payload.userId, { force: true });
+        } catch {
+          await interaction.update({ content: "Could not find a user with that ID.", components: [] });
+          return;
+        }
+
+        await interaction.update({ content: "Sending…", components: [] });
+
+        const fetchingEmbed = {
+          color: 0xed4245,
+          description: "Fetching Deleted Message ●●●",
+        };
+        const msg = await interaction.followUp({ embeds: [fetchingEmbed] });
+
+        await sleep(1200);
+
+        const deletedEmbed = {
+          color: 0xed4245,
+          author: {
+            name: user.username,
+            icon_url: user.displayAvatarURL({ size: 64, extension: "png" }),
+          },
+          description: payload.message,
+          footer: { text: "🗑️ Deleted Message" },
+          timestamp: new Date().toISOString(),
+        };
+        await msg.edit({ embeds: [deletedEmbed] });
+        return;
+      }
 
       // Blame
       if (customId.startsWith("blame:")) {
