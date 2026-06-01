@@ -973,7 +973,8 @@ client.on("interactionCreate", async (interaction) => {
           footer: { text: "🗑️ Deleted Message" },
           timestamp: new Date().toISOString(),
         };
-        await msg.edit({ embeds: [deletedEmbed] });
+        // Use the webhook API directly — msg.edit() is unreliable on followUp messages
+        await interaction.webhook.editMessage(msg.id, { embeds: [deletedEmbed] });
         return;
       }
 
