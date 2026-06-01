@@ -62,6 +62,49 @@ function sleep(ms) {
 }
 
 // ---------------------------------------------------------------------------
+// Free AI via Pollinations.ai (no key, no credits)
+// ---------------------------------------------------------------------------
+
+async function callAI(userPrompt) {
+  const system = `You are a Discord bot action engine. The user describes what they want the bot to do in a Discord channel. Return ONLY a single valid JSON object — no markdown fences, no explanation.
+
+Available actions:
+
+raid      – spam a text message with a Fire button
+  {"action":"raid","message":"<text>","interval":1.0}
+
+say       – post one message publicly (optionally attach a generated image)
+  {"action":"say","message":"<text>","imageUrl":"<url or null>"}
+
+pollraid  – spam Discord polls with a Fire button (2-10 answers)
+  {"action":"pollraid","question":"<text>","answers":["a","b","c"],"count":5,"interval":1.0}
+
+chargeraid – charge-up grid that fires a message in bulk on release
+  {"action":"chargeraid","message":"<text>","interval":1.0}
+
+For image generation use Pollinations (free, no key):
+  imageUrl = "https://image.pollinations.ai/prompt/<URL-encoded description>?width=800&height=400&nologo=true"
+
+Return ONLY the JSON object.`;
+
+  const resp = await fetch("https://text.pollinations.ai/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "openai",
+      messages: [
+        { role: "system", content: system },
+        { role: "user",   content: userPrompt },
+      ],
+      jsonMode: true,
+    }),
+  });
+  if (!resp.ok) throw new Error(`Pollinations API ${resp.status}`);
+  const data = await resp.json();
+  return data.choices[0].message.content;
+}
+
+// ---------------------------------------------------------------------------
 // Docking points  (docking-points.json)
 // ---------------------------------------------------------------------------
 
@@ -352,6 +395,15 @@ const fakeMessageCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const doItYourselfCommand = new SlashCommandBuilder()
+  .setName("doityourself")
+  .setDescription("Tell the AI what to do — it figures out the rest")
+  .addStringOption((opt) =>
+    opt.setName("prompt").setDescription('e.g. "spam ur a goon 5 times" or "make a poll asking who is the biggest L"').setRequired(true)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const uploadHitlistCommand = new SlashCommandBuilder()
   .setName("uploadhitlist")
   .setDescription("Add or update a target on the hitlist")
@@ -424,6 +476,7 @@ async function registerCommands(clientId) {
         anthemCommand.toJSON(),
         blameCommand.toJSON(),
         fakeMessageCommand.toJSON(),
+        doItYourselfCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
         deleteHitlistCommand.toJSON(),
@@ -673,6 +726,73 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.commandName === "anthem") {
         const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
         await interaction.reply({ content: "https://youtube.com/shorts/T9KK2udDHNo?si=6aGsKcsObNUMC9KD", ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === "doityourself") {
+        const prompt = interaction.options.getString("prompt");
+        await interaction.deferReply({ ephemeral: true });
+
+        let raw;
+        try {
+          raw = await callAI(prompt);
+        } catch (err) {
+          console.error("doityourself AI error:", err);
+          await interaction.editReply({ content: "⚠️ AI is unavailable right now. Try again in a moment." });
+          return;
+        }
+
+        let action;
+        try {
+          action = JSON.parse(raw);
+        } catch {
+          await interaction.editReply({ content: `⚠️ AI returned something unexpected. Try rephrasing.\n\`\`\`${raw.slice(0, 400)}\`\`\`` });
+          return;
+        }
+
+        if (action.action === "raid") {
+          const id = storePayload({ type: "text", content: action.message, interval: action.interval ?? 1.0 });
+          await interaction.editReply({
+            content: `🤖 **AI Raid Ready**\n> ${action.message}`,
+            components: [getSpamRow("r", id)],
+          });
+          return;
+        }
+
+        if (action.action === "say") {
+          await interaction.editReply({ content: "✅ Posting…" });
+          if (action.imageUrl) {
+            await interaction.followUp({
+              content: action.message || "",
+              embeds: [{ image: { url: action.imageUrl }, color: 0x5865f2 }],
+            });
+          } else {
+            await interaction.followUp({ content: action.message });
+          }
+          return;
+        }
+
+        if (action.action === "pollraid") {
+          const answers = (action.answers ?? ["Yes", "No"]).slice(0, 10);
+          if (answers.length < 2) answers.push("No");
+          const id = storePayload({ type: "poll", question: action.question, answers, duration: 24, count: action.count ?? 5, interval: action.interval ?? 1.0 });
+          await interaction.editReply({
+            content: `🤖 **AI Poll Raid Ready**\n> ${action.question}`,
+            components: [getSpamRow("p", id)],
+          });
+          return;
+        }
+
+        if (action.action === "chargeraid") {
+          const id = storePayload({ type: "chargeraid", content: action.message, interval: action.interval ?? 1.0, charged: 0 });
+          await interaction.editReply({
+            content: chargeRaidContent(action.message, 0),
+            components: getChargeRaidRows(id, 0),
+          });
+          return;
+        }
+
+        await interaction.editReply({ content: `⚠️ AI chose an unknown action (\`${action.action}\`). Try rephrasing.` });
         return;
       }
 
