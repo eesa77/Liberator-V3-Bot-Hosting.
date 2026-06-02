@@ -10,6 +10,7 @@ const {
   ApplicationIntegrationType,
   InteractionContextType,
   PermissionFlagsBits,
+  ChannelType,
 } = require("discord.js");
 const fs = require("fs");
 
@@ -395,6 +396,27 @@ const fakeMessageCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const threadRaidCommand = new SlashCommandBuilder()
+  .setName("threadraid")
+  .setDescription("Spam-create threads in a channel")
+  .addChannelOption((opt) =>
+    opt.setName("channel").setDescription("The channel to spam threads in").setRequired(true)
+  )
+  .addStringOption((opt) =>
+    opt.setName("name").setDescription("Thread name (a random number is appended each time)").setRequired(true)
+  )
+  .addStringOption((opt) =>
+    opt.setName("message").setDescription("Message inside each thread (required for forum channels)").setRequired(false)
+  )
+  .addNumberOption((opt) =>
+    opt.setName("interval").setDescription("Seconds between each thread (0.1-1.0, default 1.0)").setMinValue(0.1).setMaxValue(1.0).setRequired(false)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you can see the launcher").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const doItYourselfCommand = new SlashCommandBuilder()
   .setName("doityourself")
   .setDescription("Tell the AI what to do — it figures out the rest")
@@ -476,6 +498,7 @@ async function registerCommands(clientId) {
         anthemCommand.toJSON(),
         blameCommand.toJSON(),
         fakeMessageCommand.toJSON(),
+        threadRaidCommand.toJSON(),
         doItYourselfCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
         viewHitlistCommand.toJSON(),
@@ -729,6 +752,21 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      if (interaction.commandName === "threadraid") {
+        const channel   = interaction.options.getChannel("channel");
+        const name      = interaction.options.getString("name");
+        const message   = interaction.options.getString("message") ?? name;
+        const interval  = interaction.options.getNumber("interval") ?? 1.0;
+        const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
+        const id = storePayload({ type: "threadraid", channelId: channel.id, threadName: name, message, interval });
+        await interaction.reply({
+          content: `Thread Raid ready — **${name}** in <#${channel.id}>`,
+          components: [getSpamRow("tr", id)],
+          ephemeral,
+        });
+        return;
+      }
+
       if (interaction.commandName === "doityourself") {
         const prompt = interaction.options.getString("prompt");
         await interaction.deferReply({ ephemeral: true });
@@ -934,6 +972,45 @@ client.on("interactionCreate", async (interaction) => {
     // -----------------------------------------------------------------------
     if (interaction.isButton()) {
       const customId = interaction.customId;
+
+      // Thread Raid buttons
+      if (customId.startsWith("trfire:") || customId.startsWith("trmore:")) {
+        const colon   = customId.indexOf(":");
+        const action  = customId.slice(2, colon);
+        const id      = customId.slice(colon + 1);
+        const payload = messageStore.get(id);
+        if (!payload) {
+          await interaction.reply({ content: "This session has expired. Run /threadraid again.", ephemeral: true });
+          return;
+        }
+        const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
+        if (action === "fire") {
+          await interaction.deferUpdate();
+          let channel;
+          try { channel = await client.channels.fetch(payload.channelId); } catch {
+            await interaction.followUp({ content: "Could not fetch that channel.", ephemeral: true });
+            return;
+          }
+          for (let i = 0; i < 5; i++) {
+            try {
+              const threadName = `${payload.threadName} ${Math.floor(Math.random() * 9999)}`;
+              if (channel.type === ChannelType.GuildForum || channel.type === ChannelType.GuildMedia) {
+                await channel.threads.create({ name: threadName, message: { content: payload.message } });
+              } else {
+                const thread = await channel.threads.create({ name: threadName, type: ChannelType.PublicThread });
+                await thread.send(payload.message);
+              }
+              await sleep(intervalMs);
+            } catch (err) { console.error("threadraid fire error:", err); }
+          }
+          return;
+        }
+        if (action === "more") {
+          await interaction.deferUpdate();
+          await interaction.followUp({ content: `Thread Raid: **${payload.threadName}** in <#${payload.channelId}>`, components: [getSpamRow("tr", id)] });
+          return;
+        }
+      }
 
       // Fake message
       if (customId.startsWith("fakemsg:")) {
