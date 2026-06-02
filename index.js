@@ -758,7 +758,7 @@ client.on("interactionCreate", async (interaction) => {
         const message   = interaction.options.getString("message") ?? name;
         const interval  = interaction.options.getNumber("interval") ?? 1.0;
         const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
-        const id = storePayload({ type: "threadraid", channelId: channel.id, threadName: name, message, interval });
+        const id = storePayload({ type: "threadraid", channelId: channel.id, channelType: channel.type, threadName: name, message, interval });
         await interaction.reply({
           content: `Thread Raid ready — **${name}** in <#${channel.id}>`,
           components: [getSpamRow("tr", id)],
@@ -986,19 +986,16 @@ client.on("interactionCreate", async (interaction) => {
         const intervalMs = Math.round((payload.interval ?? 1.0) * 1000);
         if (action === "fire") {
           await interaction.deferUpdate();
-          let channel;
-          try { channel = await client.channels.fetch(payload.channelId); } catch {
-            await interaction.followUp({ content: "Could not fetch that channel.", ephemeral: true });
-            return;
-          }
+          const isForum = payload.channelType === ChannelType.GuildForum || payload.channelType === ChannelType.GuildMedia;
           for (let i = 0; i < 5; i++) {
             try {
               const threadName = `${payload.threadName} ${Math.floor(Math.random() * 9999)}`;
-              if (channel.type === ChannelType.GuildForum || channel.type === ChannelType.GuildMedia) {
-                await channel.threads.create({ name: threadName, message: { content: payload.message } });
-              } else {
-                const thread = await channel.threads.create({ name: threadName, type: ChannelType.PublicThread });
-                await thread.send(payload.message);
+              const body = isForum
+                ? { name: threadName, message: { content: payload.message } }
+                : { name: threadName, type: 11 };
+              const created = await interaction.client.rest.post(`/channels/${payload.channelId}/threads`, { body });
+              if (!isForum && payload.message) {
+                await interaction.client.rest.post(`/channels/${created.id}/messages`, { body: { content: payload.message } });
               }
               await sleep(intervalMs);
             } catch (err) { console.error("threadraid fire error:", err); }
