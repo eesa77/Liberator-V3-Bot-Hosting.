@@ -396,6 +396,24 @@ const fakeMessageCommand = new SlashCommandBuilder()
   .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
   .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
 
+const sayAsUserCommand = new SlashCommandBuilder()
+  .setName("sayasuser")
+  .setDescription("Post a message disguised as another user via webhook")
+  .addUserOption((opt) =>
+    opt.setName("user").setDescription("The user to impersonate").setRequired(true)
+  )
+  .addStringOption((opt) =>
+    opt.setName("message").setDescription("What to say").setRequired(true)
+  )
+  .addChannelOption((opt) =>
+    opt.setName("channel").setDescription("Channel to post in (defaults to current)").setRequired(false)
+  )
+  .addBooleanOption((opt) =>
+    opt.setName("ephemeral").setDescription("Only you see the confirmation").setRequired(false)
+  )
+  .setIntegrationTypes([ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall])
+  .setContexts([InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel]);
+
 const threadRaidCommand = new SlashCommandBuilder()
   .setName("threadraid")
   .setDescription("Spam-create threads in a channel")
@@ -498,6 +516,7 @@ async function registerCommands(clientId) {
         anthemCommand.toJSON(),
         blameCommand.toJSON(),
         fakeMessageCommand.toJSON(),
+        sayAsUserCommand.toJSON(),
         threadRaidCommand.toJSON(),
         doItYourselfCommand.toJSON(),
         uploadHitlistCommand.toJSON(),
@@ -749,6 +768,37 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.commandName === "anthem") {
         const ephemeral = interaction.options.getBoolean("ephemeral") ?? false;
         await interaction.reply({ content: "https://youtube.com/shorts/T9KK2udDHNo?si=6aGsKcsObNUMC9KD", ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === "sayasuser") {
+        const targetUser = interaction.options.getUser("user");
+        const message    = interaction.options.getString("message");
+        const channel    = interaction.options.getChannel("channel");
+        const ephemeral  = interaction.options.getBoolean("ephemeral") ?? true;
+        const channelId  = channel?.id ?? interaction.channelId;
+        await interaction.deferReply({ ephemeral });
+
+        const username   = (targetUser.globalName ?? targetUser.username).slice(0, 80) || "User";
+        const avatarUrl  = targetUser.displayAvatarURL({ extension: "png", size: 256 });
+
+        try {
+          const webhooks = await interaction.client.rest.get(Routes.channelWebhooks(channelId));
+          let wh = webhooks.find(w => w.token);
+          if (!wh) {
+            wh = await interaction.client.rest.post(Routes.channelWebhooks(channelId), {
+              body: { name: "Liberator" },
+            });
+          }
+          await interaction.client.rest.post(Routes.webhook(wh.id, wh.token), {
+            body: { content: message, username, avatar_url: avatarUrl },
+            query: new URLSearchParams({ wait: "true" }),
+          });
+          await interaction.editReply({ content: `Sent as **${username}** in <#${channelId}>` });
+        } catch (err) {
+          console.error("sayasuser error:", err);
+          await interaction.editReply({ content: `Failed — bot needs **Manage Webhooks** permission in that channel. (${err.message ?? err})` });
+        }
         return;
       }
 
