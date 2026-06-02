@@ -1037,6 +1037,8 @@ client.on("interactionCreate", async (interaction) => {
         if (action === "fire") {
           await interaction.deferUpdate();
           const isForum = payload.channelType === ChannelType.GuildForum || payload.channelType === ChannelType.GuildMedia;
+          let ok = 0;
+          let lastErr = null;
           for (let i = 0; i < 5; i++) {
             try {
               const threadName = `${payload.threadName} ${Math.floor(Math.random() * 9999)}`;
@@ -1047,8 +1049,19 @@ client.on("interactionCreate", async (interaction) => {
               if (!isForum && payload.message) {
                 await interaction.client.rest.post(`/channels/${created.id}/messages`, { body: { content: payload.message } });
               }
+              ok++;
               await sleep(intervalMs);
-            } catch (err) { console.error("threadraid fire error:", err); }
+            } catch (err) {
+              lastErr = err;
+              console.error("threadraid fire error:", err);
+            }
+          }
+          if (ok === 0 && lastErr) {
+            const msg = lastErr?.rawError?.message ?? lastErr?.message ?? String(lastErr);
+            await interaction.followUp({ content: `❌ All 5 threads failed: \`${msg}\`\nBot needs **Create Public Threads** + **Send Messages** permission in that channel (requires guild install).`, ephemeral: true });
+          } else if (ok < 5 && lastErr) {
+            const msg = lastErr?.rawError?.message ?? lastErr?.message ?? String(lastErr);
+            await interaction.followUp({ content: `⚠️ ${ok}/5 threads created. Last error: \`${msg}\``, ephemeral: true });
           }
           return;
         }
